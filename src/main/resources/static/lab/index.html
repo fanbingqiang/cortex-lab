@@ -86,6 +86,7 @@
     <span class="logo">🔬 Cortex Lab</span>
     <span class="nav-tab active" data-tab="practice" onclick="switchTab('practice')">🎯 实战练习</span>
     <span class="nav-tab" data-tab="questions" onclick="switchTab('questions')">📚 题库</span>
+    <span class="nav-tab" data-tab="cards" onclick="switchTab('cards')">📇 知识卡片</span>
     <span class="nav-tab" data-tab="progress" onclick="switchTab('progress')">📊 进度管理</span>
     <div style="flex:1"></div>
     <span style="font-size:12px;color:var(--muted);" id="status-badge">就绪</span>
@@ -138,6 +139,17 @@
       </div>
       <div class="detail-panel" style="flex:1;" id="question-detail">
         <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);">从左侧选择一道题目开始学习</div>
+      </div>
+    </div>
+
+    <!-- ============ Cards Tab ============ -->
+    <div class="tab-content" id="tab-cards">
+      <div style="flex:1;overflow-y:auto;padding:20px 24px;max-width:960px;margin:0 auto;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+          <h2 style="font-size:18px;font-weight:600;margin:0;">📇 知识卡片</h2>
+          <span style="font-size:12px;color:var(--muted);" id="card-count">0 张</span>
+        </div>
+        <div id="card-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:12px;"></div>
       </div>
     </div>
 
@@ -250,6 +262,7 @@ function switchTab(tab) {
   document.querySelectorAll('.nav-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
   document.querySelectorAll('.tab-content').forEach(t => t.classList.toggle('active', t.id === 'tab-' + tab));
   if (tab === 'questions') loadQuestions();
+  if (tab === 'cards') loadCards();
   if (tab === 'progress') loadProgress();
   if (tab === 'practice' && editor) setTimeout(() => editor.layout(), 100);
 }
@@ -551,7 +564,7 @@ async function selectQuestion(id) {
 
         <!-- Knowledge Card -->
         <div id="card-area-${q.id}"></div>
-        ${card ? renderCardHtml(card, q.id) : `<div style="text-align:center;padding:16px;color:var(--muted);font-size:13px;border:1px dashed var(--border);border-radius:8px;margin-bottom:12px;">点击上方"生成知识卡片"整理知识点 📇</div>`}
+        ${card ? renderCardHtml(card, q.id) : `<div style="text-align:center;padding:16px;color:var(--muted);font-size:13px;border:1px dashed var(--border);border-radius:8px;margin-bottom:12px;">⏳ 正在自动生成知识卡片...</div>`}
 
         <!-- Discussion -->
         <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px;">
@@ -571,6 +584,8 @@ async function selectQuestion(id) {
         </div>
       </div>
     `;
+    // Auto-generate card if not exists
+    if (!card) generateCard(q.id);
   } catch (e) { console.error(e); }
 }
 
@@ -587,6 +602,46 @@ function renderCardHtml(card, qId) {
   </div>`;
 }
 
+function renderFullCardHtml(card) {
+  if (!card) return '';
+  const points = card.keyPoints ? card.keyPoints.split('|').map(p => p.trim()).filter(Boolean) : [];
+  const pitfalls = card.commonPitfalls ? card.commonPitfalls.split('|').map(p => p.trim()).filter(Boolean) : [];
+  const qlink = card.questionTitle ? esc(card.questionTitle) : `题目 #${card.questionId}`;
+  return `<div style="background:linear-gradient(135deg,#eff6ff,#faf5ff);border:1px solid #c7d2fe;border-radius:12px;padding:16px;">
+    <div style="display:flex;align-items:start;gap:8px;margin-bottom:8px;">
+      <span style="font-size:20px;">📇</span>
+      <div>
+        <h3 style="margin:0;font-size:15px;color:var(--purple);">${esc(card.title)}</h3>
+        <span style="font-size:11px;color:var(--muted);">来源: ${qlink}</span>
+      </div>
+    </div>
+    ${card.detailExplanation ? `<p style="font-size:13px;line-height:1.6;margin:0 0 8px;">${esc(card.detailExplanation)}</p>` : ''}
+    ${points.length > 0 ? `<div style="margin-bottom:6px;"><strong style="font-size:12px;">核心要点：</strong><div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;">${points.map(p => `<span style="background:var(--primary);color:white;padding:3px 10px;border-radius:12px;font-size:12px;">${esc(p)}</span>`).join('')}</div></div>` : ''}
+    ${card.codeSnippet ? `<div style="margin-bottom:6px;"><strong style="font-size:12px;">代码示例：</strong><pre style="background:#1e293b;color:#e2e8f0;padding:10px;border-radius:8px;font-size:12px;overflow-x:auto;margin:4px 0 0;">${esc(card.codeSnippet)}</pre></div>` : ''}
+    ${pitfalls.length > 0 ? `<div><strong style="font-size:12px;color:var(--danger);">⚠️ 常见误区：</strong><ul style="margin:4px 0 0;padding-left:18px;font-size:13px;">${pitfalls.map(p => `<li>${esc(p)}</li>`).join('')}</ul></div>` : ''}
+  </div>`;
+}
+
+async function loadCards() {
+  try {
+    const res = await api('GET', '/cards');
+    if (res.code === 200 && res.data) {
+      const list = document.getElementById('card-list');
+      if (res.data.length === 0) {
+        list.innerHTML = '<div style="text-align:center;padding:60px;color:var(--muted);font-size:14px;">📇 还没有知识卡片<br><span style="font-size:13px;">去题库中打开一道题，会自动生成卡片</span></div>';
+        document.getElementById('card-count').textContent = '0 张';
+        return;
+      }
+      list.innerHTML = res.data.map(c => `
+        <div onclick="switchTab('questions');setTimeout(()=>selectQuestion(${c.questionId}),200)" style="cursor:pointer;">
+          ${renderFullCardHtml(c)}
+        </div>
+      `).join('');
+      document.getElementById('card-count').textContent = res.data.length + ' 张';
+    }
+  } catch (e) { console.error(e); }
+}
+
 async function generateCard(qId) {
   try {
     const res = await api('POST', `/questions/${qId}/card/generate`);
@@ -599,6 +654,7 @@ async function generateCard(qId) {
         cardDiv.innerHTML = renderCardHtml(res.data, qId);
         detail.querySelector('div>div:last-child').before(cardDiv.firstElementChild);
       }
+      if (document.getElementById('tab-cards').classList.contains('active')) loadCards();
     }
   } catch (e) { console.error(e); }
 }

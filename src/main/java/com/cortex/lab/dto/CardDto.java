@@ -7,6 +7,7 @@ import java.time.LocalDateTime;
 public class CardDto {
     private Long id;
     private Long questionId;
+    private String questionTitle;
     private String title;
     private String keyPoints;
     private String detailExplanation;

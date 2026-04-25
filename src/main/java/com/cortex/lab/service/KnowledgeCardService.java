@@ -49,6 +49,16 @@ public class KnowledgeCardService {
         return card != null ? toDto(card) : null;
     }
 
+    public List<CardDto> listAll() {
+        List<KnowledgeCard> cards = cardMapper.selectList(null);
+        return cards.stream().map(c -> {
+            CardDto dto = toDto(c);
+            QuestionBank q = questionBankMapper.selectById(c.getQuestionId());
+            if (q != null) dto.setQuestionTitle(q.getTitle());
+            return dto;
+        }).collect(Collectors.toList());
+    }
+
     public CardDto generateCard(Long questionId) {
         // 检查是否已有卡片
         CardDto existing = getByQuestionId(questionId);

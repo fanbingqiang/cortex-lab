@@ -254,6 +254,16 @@ public class LabController {
 
     // ==================== 知识卡片 ====================
 
+    @GetMapping("/cards")
+    public ApiResponse<List<CardDto>> listCards() {
+        try {
+            return ApiResponse.success(knowledgeCardService.listAll());
+        } catch (Exception e) {
+            log.error("获取知识卡片列表失败", e);
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
     @GetMapping("/questions/{id}/card")
     public ApiResponse<CardDto> getCard(@PathVariable Long id) {
         try {
