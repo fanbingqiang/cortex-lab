@@ -25,6 +25,7 @@ public class LabController {
     private final QuestionBankService questionBankService;
     private final KnowledgeCardService knowledgeCardService;
     private final DiscussionService discussionService;
+    private final AssistantService assistantService;
 
     // ==================== 场景相关 (原有) ====================
 
@@ -322,6 +323,89 @@ public class LabController {
             return ApiResponse.success(null);
         } catch (Exception e) {
             log.error("删除讨论失败", e);
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
+    // ==================== 全局AI助手 ====================
+
+    @PostMapping("/assistant/chat")
+    public ApiResponse<GlobalChatResponse> assistantChat(@RequestBody GlobalChatRequest request) {
+        try {
+            if (request.getMessage() == null || request.getMessage().isBlank()) {
+                return ApiResponse.error("请输入消息");
+            }
+            GlobalChatResponse response = assistantService.chat(request);
+            return ApiResponse.success(response);
+        } catch (Exception e) {
+            log.error("全局AI对话失败", e);
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
+    @GetMapping("/assistant/config")
+    public ApiResponse<Map<String, String>> getAssistantConfig() {
+        try {
+            return ApiResponse.success(assistantService.loadConfig());
+        } catch (Exception e) {
+            log.error("获取配置失败", e);
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
+    @PutMapping("/assistant/config")
+    public ApiResponse<Map<String, String>> updateAssistantConfig(@RequestBody Map<String, String> updates) {
+        try {
+            return ApiResponse.success("配置更新成功", assistantService.updateConfig(updates));
+        } catch (Exception e) {
+            log.error("更新配置失败", e);
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
+    @GetMapping("/assistant/conversations")
+    public ApiResponse<List<AssistantConversation>> listConversations(@RequestParam(defaultValue = "anonymous") String userId) {
+        try {
+            return ApiResponse.success(assistantService.listConversations(userId));
+        } catch (Exception e) {
+            log.error("获取对话列表失败", e);
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
+    @GetMapping("/assistant/conversations/{conversationId}/messages")
+    public ApiResponse<List<AssistantMessage>> getConversationMessages(@PathVariable String conversationId) {
+        try {
+            return ApiResponse.success(assistantService.getMessages(conversationId));
+        } catch (Exception e) {
+            log.error("获取消息失败", e);
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
+    @DeleteMapping("/assistant/conversations/{conversationId}")
+    public ApiResponse<Void> deleteConversation(@PathVariable String conversationId) {
+        try {
+            assistantService.deleteConversation(conversationId);
+            return ApiResponse.success(null);
+        } catch (Exception e) {
+            log.error("删除对话失败", e);
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
+    @PostMapping("/assistant/feedback")
+    public ApiResponse<Void> submitFeedback(@RequestBody Map<String, Object> body) {
+        try {
+            String conversationId = (String) body.get("conversationId");
+            Long messageId = body.get("messageId") != null ? Long.valueOf(body.get("messageId").toString()) : null;
+            String userId = (String) body.getOrDefault("userId", "anonymous");
+            int rating = Integer.parseInt(body.get("rating").toString());
+            String comment = (String) body.get("comment");
+            assistantService.submitFeedback(conversationId, messageId, userId, rating, comment);
+            return ApiResponse.success(null);
+        } catch (Exception e) {
+            log.error("提交反馈失败", e);
             return ApiResponse.error(e.getMessage());
         }
     }

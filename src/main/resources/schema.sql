@@ -337,3 +337,85 @@ CREATE TABLE IF NOT EXISTS lab_discussion (
     content TEXT NOT NULL,
     gmt_create TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- ==================== 全局AI助手 ====================
+
+CREATE TABLE IF NOT EXISTS assistant_config (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    config_key VARCHAR(100) NOT NULL UNIQUE,
+    config_value TEXT,
+    config_type VARCHAR(50) DEFAULT 'string',
+    description VARCHAR(500),
+    gmt_create TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO assistant_config (config_key, config_value, config_type, description) SELECT * FROM (VALUES
+('temperature', '0.7', 'double', 'AI回复的随机性，0-1之间，越高越随机'),
+('max_tokens', '2048', 'int', 'AI回复的最大token数'),
+('model', 'deepseek-chat', 'string', '使用的AI模型'),
+('system_prompt', '你是一个智能编程导师"小C"，可以帮助用户解决任何编程问题。回答要简洁有力、有针对性，不要泛泛而谈。当用户的问题不够具体时，主动询问细节。', 'text', '系统提示词'),
+('rag_enabled', 'true', 'boolean', '是否启用RAG知识检索'),
+('history_enabled', 'true', 'boolean', '是否使用对话历史'),
+('evolution_enabled', 'true', 'boolean', '是否启用自我进化功能'),
+('max_history_length', '20', 'int', '对话历史最大条数')
+) AS t (config_key, config_value, config_type, description)
+WHERE NOT EXISTS (SELECT 1 FROM assistant_config WHERE assistant_config.config_key = t.config_key);
+
+CREATE TABLE IF NOT EXISTS assistant_conversation (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    conversation_id VARCHAR(50) NOT NULL UNIQUE,
+    user_id VARCHAR(50) NOT NULL,
+    title VARCHAR(200),
+    message_count INT DEFAULT 0,
+    status VARCHAR(20) DEFAULT 'ACTIVE',
+    gmt_create TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS assistant_message (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    conversation_id VARCHAR(50) NOT NULL,
+    role VARCHAR(20) NOT NULL,
+    content TEXT NOT NULL,
+    metadata TEXT,
+    gmt_create TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ==================== RAG知识块 ====================
+
+CREATE TABLE IF NOT EXISTS knowledge_chunk (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    chunk_key VARCHAR(200) NOT NULL,
+    content TEXT NOT NULL,
+    keywords VARCHAR(500),
+    source VARCHAR(100),
+    source_id BIGINT,
+    weight INT DEFAULT 1,
+    gmt_create TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ==================== 反馈与自我进化 ====================
+
+CREATE TABLE IF NOT EXISTS feedback_record (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    conversation_id VARCHAR(50),
+    message_id BIGINT,
+    user_id VARCHAR(50),
+    rating INT NOT NULL,
+    feedback_type VARCHAR(20),
+    comment TEXT,
+    gmt_create TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS evolution_insight (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    insight_key VARCHAR(200) NOT NULL,
+    insight_content TEXT NOT NULL,
+    category VARCHAR(100),
+    confidence DOUBLE DEFAULT 1.0,
+    source_count INT DEFAULT 1,
+    gmt_create TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
