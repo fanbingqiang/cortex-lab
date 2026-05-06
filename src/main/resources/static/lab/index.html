@@ -203,7 +203,10 @@
             <button class="btn btn-outline btn-sm" onclick="showImportModal()">📥 手动导入</button>
             <button class="btn btn-outline btn-sm" onclick="showBatchImportModal()">📄 批量导入 TXT</button>
           </div>
-          <input type="text" id="question-search" placeholder="搜索题目..." oninput="filterQuestions()" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;outline:none;">
+          <div style="display:flex;gap:6px;">
+            <input type="text" id="question-search" placeholder="搜索题目..." oninput="filterQuestions()" style="flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;outline:none;">
+            <button class="btn btn-sm btn-outline" onclick="filterQuestions()">🔍</button>
+          </div>
         </div>
         <div class="scroll-y" style="flex:1;" id="question-list"></div>
       </div>
@@ -307,7 +310,14 @@ let globalConvId = null;
 let codeAnalysisTimer = null;
 let lastAnalysisCode = '';
 let analysisInProgress = false;
+// Code analysis state
+let codeAnalysisTimer = null;
+let lastAnalysisCode = '';
+let analysisInProgress = false;
 let currentKnowledgePoint = '';
+
+// Tree mastery state
+let treeMasteredNodes = new Set();
 
 // ====================== Monaco Init ======================
 require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs' } });
@@ -377,7 +387,9 @@ async function sendGlobalChat() {
     const res = await api('POST', '/assistant/chat', {
       conversationId: globalConvId,
       message: msg,
-      userId: USER_ID
+      userId: USER_ID,
+      currentCode: editor ? editor.getValue() : '',
+      knowledgePoint: currentKnowledgePoint || ''
     });
     removeGlobalTempMsg();
 
@@ -550,7 +562,8 @@ async function loadConversations() {
     list.forEach(c => {
       const active = c.conversationId === globalConvId ? ' active' : '';
       const title = c.title ? c.title.substring(0, 20) : '对话';
-      html += `<span class="conv-chip${active}" onclick="switchConv('${c.conversationId}', '${esc(title)}')">💬 ${esc(title)}</span>`;
+      const delBtn = `<span onclick="deleteConv('${c.conversationId}', event)" style="margin-left:2px;cursor:pointer;opacity:0.6;font-size:10px;">✕</span>`;
+      html += `<span class="conv-chip${active}" onclick="switchConv('${c.conversationId}', '${esc(title)}')">💬 ${esc(title)} ${delBtn}</span>`;
     });
     sel.innerHTML = html;
   } catch (e) { console.error(e); }
@@ -561,6 +574,17 @@ function startNewConv() {
   document.getElementById('global-chat-messages').innerHTML =
     '<div class="chat-msg system">👋 新对话已开始！有什么想问的？</div>';
   loadConversations();
+}
+
+async function deleteConv(convId, event) {
+  event.stopPropagation();
+  if (!confirm('确定删除这个对话？')) return;
+  try {
+    const res = await api('DELETE', '/assistant/conversations/' + convId);
+    if (res.code === 200 && globalConvId === convId) startNewConv();
+    else startNewConv();
+    loadConversations();
+  } catch (e) { console.error(e); }
 }
 
 async function switchConv(convId, title) {
@@ -592,9 +616,13 @@ let treeNodeStates = {};
 
 async function loadKnowledgeTree() {
   try {
-    const res = await api('GET', '/knowledge-tree');
-    if (res.code === 200 && res.data) {
-      treeData = res.data;
+    const [treeRes, masterRes] = await Promise.all([
+      api('GET', '/knowledge-tree'),
+      api('GET', '/knowledge-tree/mastered?userId=' + USER_ID)
+    ]);
+    if (masterRes.code === 200) treeMasteredNodes = new Set(masterRes.data || []);
+    if (treeRes.code === 200 && treeRes.data) {
+      treeData = treeRes.data;
       renderTree(treeData);
     } else {
       document.getElementById('knowledge-tree-root').innerHTML = '<div style="padding:12px;color:var(--muted);font-size:13px;">加载失败</div>';
@@ -628,6 +656,15 @@ function renderNode(node, container, depth) {
     dot.textContent = '○';
     dot.style.fontSize = '8px';
     content.appendChild(dot);
+    const check = document.createElement('span');
+    check.textContent = '✅';
+    check.style.fontSize = '11px';
+    check.style.cursor = 'pointer';
+    check.style.marginLeft = '2px';
+    check.style.display = treeMasteredNodes.has(node.id) ? 'inline' : 'none';
+    check.id = 'check-' + node.id;
+    check.title = '已掌握';
+    content.appendChild(check);
   } else {
     const arrow = document.createElement('span');
     arrow.className = 'arrow';
@@ -652,6 +689,12 @@ function renderNode(node, container, depth) {
 
   if (isLeaf) {
     content.onclick = () => selectTreeNode(node);
+    const masterBtn = document.createElement('span');
+    masterBtn.textContent = treeMasteredNodes.has(node.id) ? '✅' : '✔';
+    masterBtn.style.cssText = 'font-size:11px;margin-left:auto;cursor:pointer;opacity:0.7;padding:0 4px;';
+    masterBtn.title = treeMasteredNodes.has(node.id) ? '已掌握（点击取消）' : '标记为已掌握';
+    masterBtn.onclick = (e) => { e.stopPropagation(); toggleTreeNodeMaster(node.id); };
+    content.appendChild(masterBtn);
   } else {
     content.onclick = () => toggleTreeNode(div, content);
   }
@@ -746,6 +789,24 @@ function toggleTreePanel() {
 
 function closeTreePanel() {
   document.getElementById('tree-panel').classList.remove('open');
+}
+
+async function toggleTreeNodeMaster(nodeId) {
+  const isMastered = treeMasteredNodes.has(nodeId);
+  try {
+    const res = await api('POST', '/knowledge-tree/master', {
+      nodeId: nodeId,
+      mastered: String(!isMastered),
+      userId: USER_ID
+    });
+    if (res.code === 200) {
+      if (isMastered) treeMasteredNodes.delete(nodeId);
+      else treeMasteredNodes.add(nodeId);
+      // Update UI
+      const check = document.getElementById('check-' + nodeId);
+      if (check) check.style.display = isMastered ? 'none' : 'inline';
+    }
+  } catch (e) { console.error(e); }
 }
 
 // ====================== Proactive Code Analysis ======================
@@ -873,13 +934,26 @@ async function loadQuestions() {
   } catch (e) { console.error(e); }
 }
 
-function filterQuestions() {
-  const keyword = document.getElementById('question-search').value.toLowerCase();
-  const filtered = questionsList.filter(q =>
-    (q.title && q.title.toLowerCase().includes(keyword)) ||
-    (q.description && q.description.toLowerCase().includes(keyword))
-  );
-  renderQuestionList(filtered);
+async function filterQuestions() {
+  const keyword = document.getElementById('question-search').value.toLowerCase().trim();
+  if (!keyword) { renderQuestionList(questionsList); return; }
+  try {
+    const res = await api('GET', '/questions/search?keyword=' + encodeURIComponent(keyword));
+    if (res.code === 200) renderQuestionList(res.data || []);
+    else {
+      const filtered = questionsList.filter(q =>
+        (q.title && q.title.toLowerCase().includes(keyword)) ||
+        (q.description && q.description.toLowerCase().includes(keyword))
+      );
+      renderQuestionList(filtered);
+    }
+  } catch (e) {
+    const filtered = questionsList.filter(q =>
+      (q.title && q.title.toLowerCase().includes(keyword)) ||
+      (q.description && q.description.toLowerCase().includes(keyword))
+    );
+    renderQuestionList(filtered);
+  }
 }
 
 function renderQuestionList(list) {
@@ -1075,7 +1149,12 @@ function loadToEditor(code, title) {
   switchTab('practice');
   if (editor) {
     editor.setValue(code);
-    document.getElementById('terminal-output').innerHTML = '<span style="color:#94a3b8;">来自题库：' + esc(title) + '</span>';
+    originalCode = code;
+    currentKnowledgePoint = title || '';
+    sessionId = null;
+    document.getElementById('scenario-info').textContent = '📚 ' + (title || '来自题库');
+    document.getElementById('terminal-output').innerHTML = '<span style="color:#94a3b8;">来自题库：' + esc(title) + '，点击运行看看效果</span>';
+    addGlobalMsg('system', '📚 已加载题目「' + esc(title) + '」到编辑器中，运行代码看看效果！');
   }
 }
 

@@ -79,12 +79,21 @@ public class AssistantService {
         String evolutionContext = buildEvolutionContext(config);
         String history = buildHistory(conversationId, config);
 
+        // Build code context if available
+        String codeContext = buildCodeContext(request);
+
         String systemPrompt = SYSTEM_PROMPT.formatted(
             ragContext,
             evolutionContext,
             config.getOrDefault("max_history_length", "20"),
             history
         );
+
+        // Append code context to system prompt
+        if (!codeContext.isEmpty()) {
+            systemPrompt += "\n\n## 用户当前代码\n" + codeContext
+                + "\n注意：你可以根据用户当前正在编写的代码主动提供指导，但不要重复告诉用户代码是什么，而是分析代码中的问题或可以改进的地方。";
+        }
 
         try {
             String userContent = "用户: " + request.getMessage() + "\n\n请根据上述信息，提供有针对性、简洁的回答。如果信息不足请主动询问。";
@@ -236,6 +245,18 @@ public class AssistantService {
         } catch (Exception e) {
             log.warn("更新对话计数失败: {}", e.getMessage());
         }
+    }
+
+    private String buildCodeContext(GlobalChatRequest request) {
+        String code = request.getCurrentCode();
+        String kp = request.getKnowledgePoint();
+        if ((code == null || code.isBlank()) && (kp == null || kp.isBlank())) return "";
+        StringBuilder sb = new StringBuilder();
+        if (kp != null && !kp.isBlank()) sb.append("当前知识点：").append(kp).append("\n");
+        if (code != null && !code.isBlank()) {
+            sb.append("当前编辑器中的代码：\n```java\n").append(code).append("\n```");
+        }
+        return sb.toString();
     }
 
     private String buildRagContext(String message, Map<String, String> config) {

@@ -55,6 +55,30 @@ public class LabController {
         }
     }
 
+    @PostMapping("/knowledge-tree/master")
+    public ApiResponse<Void> toggleMasterNode(@RequestBody Map<String, String> body) {
+        try {
+            String nodeId = body.get("nodeId");
+            boolean mastered = Boolean.parseBoolean(body.getOrDefault("mastered", "false"));
+            String userId = body.getOrDefault("userId", "anonymous");
+            knowledgeTreeService.toggleMastered(nodeId, userId, mastered);
+            return ApiResponse.success(null);
+        } catch (Exception e) {
+            log.error("更新知识节点状态失败", e);
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
+    @GetMapping("/knowledge-tree/mastered")
+    public ApiResponse<List<String>> getMasteredNodeIds(@RequestParam(defaultValue = "anonymous") String userId) {
+        try {
+            return ApiResponse.success(knowledgeTreeService.getMasteredNodeIds(userId));
+        } catch (Exception e) {
+            log.error("获取掌握节点失败", e);
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
     // ==================== 场景相关 (原有) ====================
 
     @GetMapping("/scenarios")
@@ -161,6 +185,16 @@ public class LabController {
     }
 
     // ==================== 题库系统 ====================
+
+    @GetMapping("/questions/search")
+    public ApiResponse<List<QuestionDto>> searchQuestions(@RequestParam String keyword) {
+        try {
+            return ApiResponse.success(questionBankService.searchQuestions(keyword));
+        } catch (Exception e) {
+            log.error("搜索题目失败", e);
+            return ApiResponse.error(e.getMessage());
+        }
+    }
 
     @GetMapping("/questions")
     public ApiResponse<List<QuestionDto>> listQuestions(@RequestParam(required = false) String userId) {

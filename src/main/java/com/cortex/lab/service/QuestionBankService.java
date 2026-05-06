@@ -91,15 +91,15 @@ public class QuestionBankService {
 """;
 
     private static final String CARD_GENERATE_PROMPT = """
-你是一个知识整理专家。请根据以下题目信息，生成一张结构化的知识卡片。
+你是一个知识整理专家。请根据以下信息生成一张极简知识卡片。
 返回严格的 JSON 格式（不要 markdown 标记）：
 
 {
   "title": "知识点标题",
-  "keyPoints": "核心要点（分点列举，用 | 分隔）",
-  "detailExplanation": "详细原理解释",
-  "codeSnippet": "总结性的代码示例（展示正确用法）",
-  "commonPitfalls": "常见误区（分点列举，用 | 分隔）"
+  "keyPoints": "要点1|要点2|要点3（每条10字以内）",
+  "detailExplanation": "一句话原理解释（50字以内）",
+  "codeSnippet": "正确代码示例（10行以内，只展示关键差异）",
+  "commonPitfalls": "误区1|误区2（每条15字以内）"
 }
 
 题目: %s
@@ -147,6 +147,9 @@ public class QuestionBankService {
     }
 
     public QuestionDto generateFromQuestion(String userQuestion) {
+        if (hasSimilarQuestion(userQuestion)) {
+            throw new RuntimeException("检测到类似问题已存在，请先搜索确认不是重复问题");
+        }
         String prompt = GENERATE_PROMPT.formatted(userQuestion);
         try {
             String result = llmClient.chatSimple(prompt);
@@ -255,6 +258,33 @@ public class QuestionBankService {
             }
         }
         return count;
+    }
+
+    public List<QuestionDto> searchQuestions(String keyword) {
+        if (keyword == null || keyword.isBlank()) return listAll(null);
+        List<QuestionBank> all = questionBankMapper.selectList(null);
+        String lower = keyword.toLowerCase();
+        return all.stream()
+            .filter(q -> (q.getTitle() != null && q.getTitle().toLowerCase().contains(lower))
+                || (q.getDescription() != null && q.getDescription().toLowerCase().contains(lower))
+                || (q.getCategory() != null && q.getCategory().toLowerCase().contains(lower)))
+            .map(this::toDto)
+            .collect(Collectors.toList());
+    }
+
+    public boolean hasSimilarQuestion(String title) {
+        if (title == null || title.isBlank()) return false;
+        String normalized = title.replaceAll("[\\s,.!?;:，。！？；：、]", "").toLowerCase();
+        List<QuestionBank> all = questionBankMapper.selectList(null);
+        for (QuestionBank q : all) {
+            if (q.getTitle() == null) continue;
+            String qNorm = q.getTitle().replaceAll("[\\s,.!?;:，。！？；：、]", "").toLowerCase();
+            if (qNorm.contains(normalized) || normalized.contains(qNorm)) return true;
+            String longer = normalized.length() >= qNorm.length() ? normalized : qNorm;
+            String shorter = normalized.length() >= qNorm.length() ? qNorm : normalized;
+            if (longer.contains(shorter)) return true;
+        }
+        return false;
     }
 
     public void deleteQuestion(Long id) {

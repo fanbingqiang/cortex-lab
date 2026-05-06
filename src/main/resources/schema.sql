@@ -419,3 +419,15 @@ CREATE TABLE IF NOT EXISTS evolution_insight (
     gmt_create TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     gmt_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+
+-- ==================== 知识树节点进度 ====================
+CREATE TABLE IF NOT EXISTS lab_tree_progress (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    node_id VARCHAR(100) NOT NULL,
+    user_id VARCHAR(50) NOT NULL,
+    mastered BOOLEAN DEFAULT FALSE,
+    gmt_create TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (node_id, user_id)
+);

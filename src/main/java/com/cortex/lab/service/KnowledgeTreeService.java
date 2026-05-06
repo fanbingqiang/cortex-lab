@@ -143,6 +143,50 @@ public class KnowledgeTreeService {
         return tree;
     }
 
+    public void toggleMastered(String nodeId, String userId, boolean mastered) {
+        try {
+            String key = "tree_mastered_" + userId + "_" + nodeId;
+            List<AssistantConfig> existing = configMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AssistantConfig>()
+                    .eq(AssistantConfig::getConfigKey, key)
+                    .last("LIMIT 1")
+            );
+            if (!existing.isEmpty()) {
+                AssistantConfig c = existing.get(0);
+                c.setConfigValue(String.valueOf(mastered));
+                c.setGmtModified(LocalDateTime.now());
+                configMapper.updateById(c);
+            } else {
+                AssistantConfig c = new AssistantConfig();
+                c.setConfigKey(key);
+                c.setConfigValue(String.valueOf(mastered));
+                c.setConfigType("boolean");
+                c.setGmtCreate(LocalDateTime.now());
+                c.setGmtModified(LocalDateTime.now());
+                configMapper.insert(c);
+            }
+        } catch (Exception e) {
+            log.warn("保存节点掌握状态失败: {}", e.getMessage());
+        }
+    }
+
+    public List<String> getMasteredNodeIds(String userId) {
+        try {
+            String prefix = "tree_mastered_" + userId + "_";
+            List<AssistantConfig> all = configMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AssistantConfig>()
+                    .likeRight(AssistantConfig::getConfigKey, prefix)
+            );
+            return all.stream()
+                .filter(c -> "true".equals(c.getConfigValue()))
+                .map(c -> c.getConfigKey().substring(prefix.length()))
+                .collect(java.util.stream.Collectors.toList());
+        } catch (Exception e) {
+            log.warn("获取节点掌握状态失败: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
     private static KnowledgeNodeDTO node(String id, String name, String description) {
         return new KnowledgeNodeDTO(id, name, description, null, true);
     }
