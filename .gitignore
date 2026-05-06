@@ -13,3 +13,4 @@ data/
 .vscode/
 *.mv.db
 *.trace.db
+.claude/

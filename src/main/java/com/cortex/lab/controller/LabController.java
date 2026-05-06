@@ -26,6 +26,34 @@ public class LabController {
     private final KnowledgeCardService knowledgeCardService;
     private final DiscussionService discussionService;
     private final AssistantService assistantService;
+    private final KnowledgeTreeService knowledgeTreeService;
+
+    // ==================== 知识树 ====================
+
+    @GetMapping("/knowledge-tree")
+    public ApiResponse<List<KnowledgeNodeDTO>> getKnowledgeTree() {
+        try {
+            return ApiResponse.success(knowledgeTreeService.getTree());
+        } catch (Exception e) {
+            log.error("获取知识树失败", e);
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
+    @PostMapping("/knowledge-tree/generate")
+    public ApiResponse<ScenarioDto> generateFromTree(@RequestBody Map<String, String> body) {
+        try {
+            String nodeId = body.get("nodeId");
+            if (nodeId == null || nodeId.isBlank()) {
+                return ApiResponse.error("请选择知识点");
+            }
+            ScenarioDto dto = knowledgeTreeService.generateForNode(nodeId);
+            return ApiResponse.success("代码生成成功", dto);
+        } catch (Exception e) {
+            log.error("知识树代码生成失败", e);
+            return ApiResponse.error(e.getMessage());
+        }
+    }
 
     // ==================== 场景相关 (原有) ====================
 
