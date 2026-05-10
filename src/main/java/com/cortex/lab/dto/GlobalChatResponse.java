@@ -3,6 +3,7 @@ package com.cortex.lab.dto;
 import lombok.Data;
 
 import java.util.List;
+import java.util.Map;
 
 @Data
 public class GlobalChatResponse {
@@ -11,4 +12,5 @@ public class GlobalChatResponse {
     private boolean incomplete;
     private String askReason;
     private List<String> suggestions;
+    private Map<String, Object> action;
 }

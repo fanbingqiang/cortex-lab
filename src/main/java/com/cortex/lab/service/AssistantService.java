@@ -27,25 +27,31 @@ public class AssistantService {
     private final LlmClient llmClient;
     private final RagService ragService;
     private final EvolutionService evolutionService;
+    private final QuestionBankMapper questionBankMapper;
 
     private static final String SYSTEM_PROMPT = """
-你是一个智能编程导师"小C"。你可以帮助用户解决任何编程、技术、计算机科学相关的问题。
+你是一个智能编程导师"小C"，运行在代码练习平台 Cortex Lab 中。
+你可以回答编程问题，也可以执行平台操作。需要操作时在 action 中指定。
 
-## 核心原则
-1. **回答要有针对性**：根据用户的具体问题给出精准回答，不要预先给出通用答案
-2. **主动询问**：当用户的问题不够具体、信息不足时，主动询问细节
-3. **不打断用户**：让用户完整表达，但如果用户连续追问，要基于新信息调整回答
-4. **简洁有力**：回答要精炼，直击要点，避免啰嗦
-5. **从原因到结果**：先解释原理，再给出结果或建议
+## 回答原则
+- 简洁有针对性，不要啰嗦
+- 需要操作时在 action 字段指定；不需要时 action 设为 null
+- 用户想打开题目、运行代码等，直接执行不要问"要不要"
 
-## 回答策略
-- 如果用户的问题很模糊：指出需要哪些具体信息，主动提问
-- 如果用户给出了代码：分析代码中的关键问题，提供针对性指导
-- 如果用户在追问：基于新的信息调整你的分析
-- 如果可以举一反三：提供一个相关的扩展知识点
+## 可用操作
+- {"type":"switchTab","payload":"practice|questions|cards"} — 切换标签
+- {"type":"selectQuestion","payload":题目ID} — 题库打开题目
+- {"type":"loadToEditor","payload":题目ID} — 加载代码到编辑器
+- {"type":"runCode"} — 运行代码
+- {"type":"resetCode"} — 重置代码
+
+## 题库列表
+%s
+
+## 用户当前代码
+%s
 
 ## RAG上下文
-以下是从知识库中检索到的相关内容，可作为参考：
 %s
 
 ## 进化知识库
@@ -54,13 +60,11 @@ public class AssistantService {
 ## 对话历史（最近%s条）
 %s
 
-## 输出格式
-你必须严格按照以下JSON格式回复，不要包含其他内容：
+## 输出格式（严格JSON）
 {
-  "reply": "你的回答，要简洁有针对性",
-  "incomplete": false,
-  "askReason": "如果incomplete为true，说明需要什么信息",
-  "suggestions": ["建议1", "建议2", "建议3"]
+  "reply": "你的回答",
+  "action": {"type": "操作名", "payload": 参数},
+  "suggestions": ["建议1", "建议2"]
 }
 """;
 
@@ -75,49 +79,36 @@ public class AssistantService {
 
         saveMessage(conversationId, "user", request.getMessage(), null);
 
+        String questionList = buildQuestionList();
+        String codeContext = buildCodeContext(request);
         String ragContext = buildRagContext(request.getMessage(), config);
         String evolutionContext = buildEvolutionContext(config);
         String history = buildHistory(conversationId, config);
 
-        // Build code context if available
-        String codeContext = buildCodeContext(request);
-
         String systemPrompt = SYSTEM_PROMPT.formatted(
+            questionList,
+            codeContext,
             ragContext,
             evolutionContext,
             config.getOrDefault("max_history_length", "20"),
             history
         );
 
-        // Append code context to system prompt
-        if (!codeContext.isEmpty()) {
-            systemPrompt += "\n\n## 用户当前代码\n" + codeContext
-                + "\n注意：你可以根据用户当前正在编写的代码主动提供指导，但不要重复告诉用户代码是什么，而是分析代码中的问题或可以改进的地方。";
-        }
-
         try {
-            String userContent = "用户: " + request.getMessage() + "\n\n请根据上述信息，提供有针对性、简洁的回答。如果信息不足请主动询问。";
-            String model = config.getOrDefault("model", "deepseek-chat");
-            double temperature = Double.parseDouble(config.getOrDefault("temperature", "0.7"));
-            int maxTokens = Integer.parseInt(config.getOrDefault("max_tokens", "2048"));
-
-            LlmRequest llmReq = LlmRequest.create(model, systemPrompt, userContent);
-            llmReq.setTemperature(temperature);
-            llmReq.setMaxTokens(maxTokens);
-
+            String userContent = "用户说: " + request.getMessage();
             String result = llmClient.chatSimple(systemPrompt, userContent);
 
             GlobalChatResponse response = parseResponse(result);
             response.setConversationId(conversationId);
 
             saveMessage(conversationId, "assistant", response.getReply(), null);
-
             updateConversationCount(conversationId);
 
-            evolutionService.extractInsightFromConversation(conversationId,
-                List.of(request.getMessage(), response.getReply()));
-
-            evolutionService.indexKnowledgeCards(conversationId, request.getMessage(), response.getReply());
+            if (response.getReply() != null && !response.getReply().isBlank()) {
+                evolutionService.extractInsightFromConversation(conversationId,
+                    List.of(request.getMessage(), response.getReply()));
+                evolutionService.indexKnowledgeCards(conversationId, request.getMessage(), response.getReply());
+            }
 
             return response;
 
@@ -126,9 +117,8 @@ public class AssistantService {
 
             GlobalChatResponse fallback = new GlobalChatResponse();
             fallback.setConversationId(conversationId);
-            fallback.setReply("抱歉，我暂时无法回答这个问题。请稍后再试，或者换个方式描述你的问题。");
-            fallback.setIncomplete(false);
-            fallback.setSuggestions(List.of("换个角度描述问题", "检查网络连接"));
+            fallback.setReply("抱歉，我暂时无法回答。请检查 API Key 是否已配置。");
+            fallback.setSuggestions(List.of("配置 API Key", "换个方式描述问题"));
             return fallback;
         }
     }
@@ -247,6 +237,19 @@ public class AssistantService {
         }
     }
 
+    private String buildQuestionList() {
+        try {
+            List<com.cortex.lab.entity.QuestionBank> list = questionBankMapper.selectList(null);
+            if (list.isEmpty()) return "（暂无题目）";
+            return list.stream()
+                .limit(30)
+                .map(q -> "  ID=" + q.getId() + " " + q.getTitle())
+                .collect(Collectors.joining("\n"));
+        } catch (Exception e) {
+            return "（加载题目列表失败）";
+        }
+    }
+
     private String buildCodeContext(GlobalChatRequest request) {
         String code = request.getCurrentCode();
         String kp = request.getKnowledgePoint();
@@ -344,6 +347,10 @@ public class AssistantService {
             response.setReply(json.getString("reply"));
             response.setIncomplete(json.getBooleanValue("incomplete"));
             response.setAskReason(json.getString("askReason"));
+
+            if (json.containsKey("action") && json.get("action") instanceof Map) {
+                response.setAction(json.getJSONObject("action"));
+            }
 
             if (json.containsKey("suggestions")) {
                 List<String> suggestions = json.getList("suggestions", String.class);

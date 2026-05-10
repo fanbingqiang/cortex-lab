@@ -293,6 +293,10 @@ public class QuestionBankService {
             new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<QuestionProgress>()
                 .eq(QuestionProgress::getQuestionId, id)
         );
+        cardMapper.delete(
+            new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<KnowledgeCard>()
+                .eq(KnowledgeCard::getQuestionId, id)
+        );
     }
 
     public void setMastered(Long questionId, String userId, boolean mastered) {

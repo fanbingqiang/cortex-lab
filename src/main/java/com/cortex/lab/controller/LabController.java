@@ -339,6 +339,28 @@ public class LabController {
         }
     }
 
+    @DeleteMapping("/cards/{id}")
+    public ApiResponse<Void> deleteCard(@PathVariable Long id) {
+        try {
+            knowledgeCardService.deleteCard(id);
+            return ApiResponse.success(null);
+        } catch (Exception e) {
+            log.error("删除知识卡片失败", e);
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
+    @PutMapping("/cards/{id}")
+    public ApiResponse<CardDto> updateCard(@PathVariable Long id, @RequestBody CardDto dto) {
+        try {
+            CardDto card = knowledgeCardService.updateCard(id, dto);
+            return ApiResponse.success("知识卡片更新成功！", card);
+        } catch (Exception e) {
+            log.error("更新知识卡片失败", e);
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
     @PostMapping("/questions/{id}/card/generate")
     public ApiResponse<CardDto> generateCard(@PathVariable Long id) {
         try {

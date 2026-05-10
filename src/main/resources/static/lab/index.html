@@ -222,7 +222,7 @@
           <h2 style="font-size:18px;font-weight:600;margin:0;">📇 知识卡片</h2>
           <span style="font-size:12px;color:var(--muted);" id="card-count">0 张</span>
         </div>
-        <div id="card-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:12px;"></div>
+        <div id="card-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;"></div>
       </div>
     </div>
 
@@ -394,8 +394,10 @@ async function sendGlobalChat() {
       globalConvId = d.conversationId;
 
       let replyHtml = esc(d.reply || '(AI回复)');
-      if (d.incomplete && d.askReason) {
-        replyHtml = '<div class="chat-msg incomplete">🔍 ' + esc(d.askReason) + '</div>' + replyHtml;
+
+      // Execute AI action if present
+      if (d.action && d.action.type) {
+        executeAiAction(d.action);
       }
 
       const msgId = addGlobalMsg('ai', replyHtml);
@@ -443,6 +445,31 @@ function removeGlobalTempMsg() {
       msgs[i].remove();
       break;
     }
+  }
+}
+
+function executeAiAction(action) {
+  if (!action || !action.type) return;
+  switch (action.type) {
+    case 'switchTab':
+      if (action.payload) switchTab(action.payload);
+      break;
+    case 'selectQuestion':
+      if (action.payload) { switchTab('questions'); setTimeout(() => selectQuestion(Number(action.payload)), 300); }
+      break;
+    case 'loadToEditor':
+      if (action.payload) {
+        const q = questionsList.find(q => q.id === Number(action.payload));
+        if (q && q.trapCode) loadToEditor(q.trapCode, q.title);
+        else api('GET', '/questions/' + action.payload).then(r => { if (r.code === 200 && r.data) loadToEditor(r.data.trapCode, r.data.title); }).catch(() => {});
+      }
+      break;
+    case 'runCode':
+      runCode();
+      break;
+    case 'resetCode':
+      resetCode();
+      break;
   }
 }
 
@@ -1051,12 +1078,14 @@ function renderCardHtml(card, qId) {
   if (!card) return '';
   const points = card.keyPoints ? card.keyPoints.split('|').map(p => p.trim()).filter(Boolean) : [];
   const pitfalls = card.commonPitfalls ? card.commonPitfalls.split('|').map(p => p.trim()).filter(Boolean) : [];
-  const brief = (card.detailExplanation || card.keyPoints || '').substring(0, 100);
-  return `<div id="card-area-${qId}" style="background:linear-gradient(135deg,#eff6ff,#faf5ff);border:1px solid #c7d2fe;border-radius:10px;padding:12px;margin-bottom:12px;">
-    <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;"><span style="font-size:14px;">📇</span><strong style="font-size:13px;color:var(--purple);">${esc(card.title)}</strong></div>
-    <p style="margin:0;font-size:13px;color:var(--text);">${brief.length > 0 ? esc(brief)+'...' : ''}</p>
-    ${pitfalls.length > 0 ? `<p style="margin:4px 0 0;font-size:12px;color:var(--danger);">⚠️ ${esc(pitfalls[0])}</p>` : ''}
-    <div style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap;">${points.slice(0,3).map(p => `<span style="background:var(--primary-light);padding:2px 8px;border-radius:10px;font-size:11px;color:var(--primary);">${esc(p)}</span>`).join('')}</div>
+  return `<div id="card-area-${qId}" class="compact-card" style="background:linear-gradient(135deg,#eff6ff,#faf5ff);border:1px solid #c7d2fe;border-radius:8px;padding:10px;margin-bottom:10px;">
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+      <span style="font-size:12px;">📇</span>
+      <strong style="font-size:12px;color:var(--purple);">${esc(card.title)}</strong>
+    </div>
+    ${card.detailExplanation ? `<p style="margin:2px 0 4px;font-size:11px;color:var(--text);line-height:1.4;">${esc(card.detailExplanation)}</p>` : ''}
+    ${points.length > 0 ? `<div style="display:flex;flex-wrap:wrap;gap:3px;">${points.slice(0,3).map(p => `<span style="background:var(--primary);color:white;padding:1px 7px;border-radius:8px;font-size:10px;">${esc(p)}</span>`).join('')}</div>` : ''}
+    ${pitfalls.length > 0 ? `<div style="margin-top:4px;font-size:10px;color:var(--danger);">⚠ ${esc(pitfalls[0])}</div>` : ''}
   </div>`;
 }
 
@@ -1064,20 +1093,113 @@ function renderFullCardHtml(card) {
   if (!card) return '';
   const points = card.keyPoints ? card.keyPoints.split('|').map(p => p.trim()).filter(Boolean) : [];
   const pitfalls = card.commonPitfalls ? card.commonPitfalls.split('|').map(p => p.trim()).filter(Boolean) : [];
-  const qlink = card.questionTitle ? esc(card.questionTitle) : `题目 #${card.questionId}`;
-  return `<div style="background:linear-gradient(135deg,#eff6ff,#faf5ff);border:1px solid #c7d2fe;border-radius:12px;padding:16px;">
-    <div style="display:flex;align-items:start;gap:8px;margin-bottom:8px;">
-      <span style="font-size:20px;">📇</span>
-      <div>
-        <h3 style="margin:0;font-size:15px;color:var(--purple);">${esc(card.title)}</h3>
-        <span style="font-size:11px;color:var(--muted);">来源: ${qlink}</span>
+  const editing = sessionStorage.getItem('editing-card') === String(card.id);
+  if (editing) return renderEditCardHtml(card);
+
+  return `<div class="mini-card" style="background:linear-gradient(135deg,#eff6ff,#faf5ff);border:1px solid #c7d2fe;border-radius:10px;padding:12px;position:relative;">
+    <div style="display:flex;align-items:start;justify-content:space-between;margin-bottom:6px;">
+      <div style="display:flex;align-items:center;gap:6px;min-width:0;flex:1;">
+        <span style="font-size:16px;">📇</span>
+        <div style="min-width:0;flex:1;">
+          <div style="font-size:13px;font-weight:600;color:var(--purple);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;" onclick="loadCardToPractice(${card.questionId},'${esc(card.title)}')" title="点击在练习中打开">${esc(card.title)}</div>
+          <div style="font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${card.questionTitle ? esc(card.questionTitle) : '#'+card.questionId}</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:2px;flex-shrink:0;">
+        <button onclick="event.stopPropagation();startCardEdit(${card.id})" style="background:none;border:none;cursor:pointer;font-size:13px;color:var(--muted);padding:2px 4px;border-radius:4px;" title="编辑">✏️</button>
+        <button onclick="event.stopPropagation();deleteCardConfirm(${card.id})" style="background:none;border:none;cursor:pointer;font-size:13px;color:var(--danger);padding:2px 4px;border-radius:4px;" title="删除">🗑️</button>
       </div>
     </div>
-    ${card.detailExplanation ? `<p style="font-size:13px;line-height:1.6;margin:0 0 8px;">${esc(card.detailExplanation)}</p>` : ''}
-    ${points.length > 0 ? `<div style="margin-bottom:6px;"><strong style="font-size:12px;">核心要点：</strong><div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;">${points.map(p => `<span style="background:var(--primary);color:white;padding:3px 10px;border-radius:12px;font-size:12px;">${esc(p)}</span>`).join('')}</div></div>` : ''}
-    ${card.codeSnippet ? `<div style="margin-bottom:6px;"><strong style="font-size:12px;">代码示例：</strong><pre style="background:#1e293b;color:#e2e8f0;padding:10px;border-radius:8px;font-size:12px;overflow-x:auto;margin:4px 0 0;">${esc(card.codeSnippet)}</pre></div>` : ''}
-    ${pitfalls.length > 0 ? `<div><strong style="font-size:12px;color:var(--danger);">⚠️ 常见误区：</strong><ul style="margin:4px 0 0;padding-left:18px;font-size:13px;">${pitfalls.map(p => `<li>${esc(p)}</li>`).join('')}</ul></div>` : ''}
+    ${card.detailExplanation ? `<p style="margin:0 0 6px;font-size:11px;color:var(--text);line-height:1.4;">${esc(card.detailExplanation)}</p>` : ''}
+    ${points.length > 0 ? `<div style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:6px;">${points.map(p => `<span style="background:var(--primary);color:white;padding:2px 8px;border-radius:10px;font-size:10px;">${esc(p)}</span>`).join('')}</div>` : ''}
+    ${pitfalls.length > 0 ? `<div style="font-size:10px;color:var(--danger);line-height:1.4;">${pitfalls.map(p => `⚠ ${esc(p)}`).join(' | ')}</div>` : ''}
   </div>`;
+}
+
+function renderEditCardHtml(card) {
+  if (!card) return '';
+  const escAttr = v => v ? v.replace(/"/g,'&quot;') : '';
+  const pointsStr = card.keyPoints || '';
+  const pitfallsStr = card.commonPitfalls || '';
+  return `<div class="mini-card editing" style="background:#fffbeb;border:2px solid var(--warning);border-radius:10px;padding:12px;position:relative;">
+    <div style="font-size:11px;font-weight:600;color:var(--warning);margin-bottom:8px;">✏️ 编辑知识卡片</div>
+    <div style="margin-bottom:6px;">
+      <label style="font-size:10px;color:var(--muted);display:block;">标题</label>
+      <input id="edit-title-${card.id}" value="${escAttr(card.title)}" style="width:100%;padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
+    </div>
+    <div style="margin-bottom:6px;">
+      <label style="font-size:10px;color:var(--muted);display:block;">一句话解释</label>
+      <input id="edit-explain-${card.id}" value="${escAttr(card.detailExplanation)}" style="width:100%;padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
+    </div>
+    <div style="margin-bottom:6px;">
+      <label style="font-size:10px;color:var(--muted);display:block;">要点（用 | 分隔）</label>
+      <input id="edit-points-${card.id}" value="${escAttr(pointsStr)}" style="width:100%;padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
+    </div>
+    <div style="margin-bottom:8px;">
+      <label style="font-size:10px;color:var(--muted);display:block;">常见误区（用 | 分隔）</label>
+      <input id="edit-pitfalls-${card.id}" value="${escAttr(pitfallsStr)}" style="width:100%;padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
+    </div>
+    <div style="display:flex;gap:6px;justify-content:flex-end;">
+      <button onclick="cancelCardEdit(${card.id})" class="btn btn-sm btn-ghost">取消</button>
+      <button onclick="saveCardEdit(${card.id})" class="btn btn-sm btn-primary">保存</button>
+    </div>
+  </div>`;
+}
+
+function loadCardToPractice(qId, title) {
+  const q = questionsList.find(q => q.id === qId);
+  if (q && q.trapCode) {
+    loadToEditor(q.trapCode, title || q.title);
+  } else {
+    api('GET', '/questions/' + qId).then(res => {
+      if (res.code === 200 && res.data && res.data.trapCode) {
+        loadToEditor(res.data.trapCode, title || res.data.title);
+      }
+    }).catch(() => {});
+  }
+}
+
+async function deleteCardConfirm(id) {
+  if (!confirm('确定删除这张知识卡片吗？')) return;
+  try {
+    const res = await api('DELETE', '/cards/' + id);
+    if (res.code === 200) {
+      loadCards();
+    } else {
+      alert('删除失败: ' + (res.msg || '未知错误'));
+    }
+  } catch (e) {
+    alert('删除失败: ' + e.message);
+  }
+}
+
+function startCardEdit(id) {
+  sessionStorage.setItem('editing-card', String(id));
+  loadCards();
+}
+
+function cancelCardEdit(id) {
+  sessionStorage.removeItem('editing-card');
+  loadCards();
+}
+
+async function saveCardEdit(id) {
+  const title = document.getElementById('edit-title-' + id)?.value?.trim();
+  const detailExplanation = document.getElementById('edit-explain-' + id)?.value?.trim();
+  const keyPoints = document.getElementById('edit-points-' + id)?.value?.trim();
+  const commonPitfalls = document.getElementById('edit-pitfalls-' + id)?.value?.trim();
+  if (!title) { alert('标题不能为空'); return; }
+  try {
+    const res = await api('PUT', '/cards/' + id, { title, detailExplanation, keyPoints, commonPitfalls });
+    if (res.code === 200) {
+      sessionStorage.removeItem('editing-card');
+      loadCards();
+    } else {
+      alert('保存失败: ' + (res.msg || '未知错误'));
+    }
+  } catch (e) {
+    alert('保存失败: ' + e.message);
+  }
 }
 
 async function loadCards() {
@@ -1090,11 +1212,7 @@ async function loadCards() {
         document.getElementById('card-count').textContent = '0 张';
         return;
       }
-      list.innerHTML = res.data.map(c => `
-        <div onclick="switchTab('questions');setTimeout(()=>selectQuestion(${c.questionId}),200)" style="cursor:pointer;">
-          ${renderFullCardHtml(c)}
-        </div>
-      `).join('');
+      list.innerHTML = res.data.map(c => renderFullCardHtml(c)).join('');
       document.getElementById('card-count').textContent = res.data.length + ' 张';
     }
   } catch (e) { console.error(e); }
@@ -1162,6 +1280,8 @@ function closeModal(id) { document.getElementById(id).style.display = 'none'; }
 async function batchImport() {
   const text = document.getElementById('batch-text').value.trim();
   if (!text) return;
+  if (text.length < 20) { alert('导入内容太短，请填写完整的题目'); return; }
+  if (/^[a-zA-Z0-9]{1,20}$/.test(text.replace(/\s/g,''))) { alert('内容过于简单，请填写有意义的题目'); return; }
   const btn = document.querySelector('#batch-import-modal .btn-primary');
   const status = document.getElementById('batch-status');
   btn.disabled = true; status.textContent = '⏳ 导入中...';
@@ -1181,6 +1301,8 @@ async function batchImport() {
 async function generateQuestion() {
   const question = document.getElementById('gen-question').value.trim();
   if (!question) return;
+  if (question.length < 4) { alert('请输入至少4个字的知识点'); return; }
+  if (/^(.)\1{2,}$/.test(question) || /^[a-zA-Z]{1,6}$/.test(question)) { alert('输入过于简单，请详细描述知识点'); return; }
   const btn = document.querySelector('#generate-modal .btn-primary');
   const status = document.getElementById('gen-status');
   btn.disabled = true; status.textContent = '⏳ AI 正在生成中...';
@@ -1199,6 +1321,8 @@ async function generateQuestion() {
 async function importQuestion() {
   const title = document.getElementById('import-title').value.trim();
   if (!title) return;
+  if (title.length < 4) { alert('标题至少4个字'); return; }
+  if (/^(.)\1{2,}$/.test(title) || /^[a-zA-Z]{1,5}$/.test(title)) { alert('标题过于简单，请输入有意义的题目'); return; }
   const desc = document.getElementById('import-desc').value.trim();
   const trapCode = document.getElementById('import-code').value.trim();
   const expectedPitfall = document.getElementById('import-pitfall').value.trim();

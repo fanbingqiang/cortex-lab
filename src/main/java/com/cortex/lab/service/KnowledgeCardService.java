@@ -26,13 +26,14 @@ public class KnowledgeCardService {
 
     private static final String CARD_PROMPT = """
     你是一个知识整理专家。请根据以下信息生成一张极简知识卡片。
+    要求：语言极其简练，只保留最核心信息。新手一看就懂。
     返回严格的 JSON 格式（不要 markdown 标记）：
     {
-      "title": "知识点标题（10字以内）",
-      "keyPoints": "要点1|要点2|要点3（每条10字以内）",
-      "detailExplanation": "一句话原理解释（50字以内）",
-      "codeSnippet": "正确代码示例（10行以内，只展示关键差异）",
-      "commonPitfalls": "误区1|误区2（每条15字以内）"
+      "title": "6字以内",
+      "keyPoints": "要点1|要点2（每条6字以内，最多3条）",
+      "detailExplanation": "一句话（20字以内）",
+      "codeSnippet": "正确代码示例（6行以内，只展示关键差异）",
+      "commonPitfalls": "误区1|误区2（每条10字以内）"
     }
     题目: %s
     陷阱: %s
@@ -86,16 +87,35 @@ public class KnowledgeCardService {
             log.error("生成知识卡片失败", e);
             KnowledgeCard card = new KnowledgeCard();
             card.setQuestionId(questionId);
-            card.setTitle(q.getTitle());
-            card.setKeyPoints("1. 这是通过 AI 生成的问题\n2. 运行代码观察意外结果\n3. 尝试修改代码验证你的猜想");
-            card.setDetailExplanation(q.getCorrectExplanation() != null ? q.getCorrectExplanation() : q.getExpectedPitfall());
+            card.setTitle(truncate(q.getTitle(), 6));
+            card.setKeyPoints("读代码|猜输出|看结果");
+            card.setDetailExplanation(truncate(q.getCorrectExplanation() != null ? q.getCorrectExplanation() : q.getExpectedPitfall(), 20));
             card.setCodeSnippet(q.getTrapCode());
-            card.setCommonPitfalls("1. 不要想当然 | 2. 动手运行验证 | 3. 理解原理而非记忆结果");
+            card.setCommonPitfalls("别想当然|动手验证");
             card.setGmtCreate(LocalDateTime.now());
             card.setGmtModified(LocalDateTime.now());
             cardMapper.insert(card);
             return toDto(card);
         }
+    }
+
+    public void deleteCard(Long id) {
+        KnowledgeCard card = cardMapper.selectById(id);
+        if (card == null) throw new RuntimeException("知识卡片不存在");
+        cardMapper.deleteById(id);
+    }
+
+    public CardDto updateCard(Long id, CardDto dto) {
+        KnowledgeCard card = cardMapper.selectById(id);
+        if (card == null) throw new RuntimeException("知识卡片不存在");
+        if (dto.getTitle() != null) card.setTitle(dto.getTitle());
+        if (dto.getKeyPoints() != null) card.setKeyPoints(dto.getKeyPoints());
+        if (dto.getDetailExplanation() != null) card.setDetailExplanation(dto.getDetailExplanation());
+        if (dto.getCodeSnippet() != null) card.setCodeSnippet(dto.getCodeSnippet());
+        if (dto.getCommonPitfalls() != null) card.setCommonPitfalls(dto.getCommonPitfalls());
+        card.setGmtModified(LocalDateTime.now());
+        cardMapper.updateById(card);
+        return toDto(card);
     }
 
     @lombok.Data
@@ -129,5 +149,10 @@ public class KnowledgeCardService {
         dto.setCommonPitfalls(card.getCommonPitfalls());
         dto.setGmtCreate(card.getGmtCreate());
         return dto;
+    }
+
+    private String truncate(String s, int max) {
+        if (s == null) return "";
+        return s.length() <= max ? s : s.substring(0, max);
     }
 }
