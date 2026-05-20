@@ -95,7 +95,7 @@ CREATE TABLE IF NOT EXISTS lab_session (
 
 INSERT INTO agent_metadata (agent_id, name, description, capabilities, input_types, output_types, priority, enabled, prompt_template)
 SELECT * FROM (VALUES
-('code-analyzer', '代码分析Agent', '分析代码结构、发现潜在问题、提供重构建议', '["code-analysis","bug-detection","refactoring"]', '["text","code"]', '["text","json"]', 1, 1, '你是一个专业的代码分析专家。请分析用户提供的代码，从以下维度进行评估：
+ROW('code-analyzer', '代码分析Agent', '分析代码结构、发现潜在问题、提供重构建议', '["code-analysis","bug-detection","refactoring"]', '["text","code"]', '["text","json"]', 1, 1, '你是一个专业的代码分析专家。请分析用户提供的代码，从以下维度进行评估：
 1. 代码质量和可读性
 2. 潜在的Bug和安全问题
 3. 性能优化建议
@@ -103,7 +103,7 @@ SELECT * FROM (VALUES
 
 请以结构化的方式输出分析结果。'),
 
-('tech-designer', '技术方案Agent', '根据需求设计技术方案，包括架构设计、技术选型、实现路径', '["architecture","tech-design","solution"]', '["text"]', '["text","json"]', 1, 1, '你是一个资深的技术架构师。请根据用户的需求描述，设计一个完整的技术方案，包括：
+ROW('tech-designer', '技术方案Agent', '根据需求设计技术方案，包括架构设计、技术选型、实现路径', '["architecture","tech-design","solution"]', '["text"]', '["text","json"]', 1, 1, '你是一个资深的技术架构师。请根据用户的需求描述，设计一个完整的技术方案，包括：
 1. 需求分析
 2. 架构设计
 3. 技术选型及理由
@@ -112,7 +112,7 @@ SELECT * FROM (VALUES
 
 请以清晰的层次结构输出方案。'),
 
-('search-agent', '搜索Agent', '搜索和收集信息', '["search","information-collection"]', '["text"]', '["text","json"]', 1, 1, '你是一个信息搜索专家。请根据用户的需求，整理相关信息，包括：
+ROW('search-agent', '搜索Agent', '搜索和收集信息', '["search","information-collection"]', '["text"]', '["text","json"]', 1, 1, '你是一个信息搜索专家。请根据用户的需求，整理相关信息，包括：
 1. 关键概念解释
 2. 相关技术或工具
 3. 最佳实践
@@ -120,7 +120,7 @@ SELECT * FROM (VALUES
 
 请以结构化的方式输出搜索结果。'),
 
-('report-generator', '报告生成Agent', '生成结构化的分析报告', '["report","summary","documentation"]', '["text","json"]', '["text","markdown"]', 1, 1, '你是一个专业的技术文档撰写专家。请根据提供的信息，生成一份结构清晰、内容详实的报告，包括：
+ROW('report-generator', '报告生成Agent', '生成结构化的分析报告', '["report","summary","documentation"]', '["text","json"]', '["text","markdown"]', 1, 1, '你是一个专业的技术文档撰写专家。请根据提供的信息，生成一份结构清晰、内容详实的报告，包括：
 1. 摘要
 2. 详细分析
 3. 结论和建议
@@ -131,7 +131,7 @@ WHERE NOT EXISTS (SELECT 1 FROM agent_metadata WHERE agent_metadata.agent_id = t
 
 INSERT INTO lab_scenario (knowledge_point, category, trap_code, expected_pitfall, correct_explanation, hints, difficulty)
 SELECT * FROM (VALUES
-(
+ROW(
 '为什么 Integer 用 == 比较 100 是 true，200 却是 false？',
 'Java基础',
 'public class IntegerCacheTrap {
@@ -154,7 +154,7 @@ SELECT * FROM (VALUES
 1
 ),
 
-(
+ROW(
 '为什么 new String("hello") 用 == 比较结果是 false？',
 'Java基础',
 'public class StringEqualsTrap {
@@ -180,7 +180,7 @@ SELECT * FROM (VALUES
 1
 ),
 
-(
+ROW(
 '为什么方法里改了 List，外面的 List 也变了？',
 'Java基础',
 'import java.util.*;
@@ -209,7 +209,7 @@ public class ListPassByRef {
 1
 ),
 
-(
+ROW(
 'HashMap 用 Person 做 key，为什么 get 不到值？',
 'Java基础',
 'import java.util.*;
@@ -240,7 +240,7 @@ public class HashMapKeyTrap {
 2
 ),
 
-(
+ROW(
 '为什么 try 里 return 了，finally 还会执行？',
 'Java基础',
 'public class FinallyTrap {
@@ -265,7 +265,7 @@ public class HashMapKeyTrap {
 2
 ),
 
-(
+ROW(
 '异常捕获：多个 catch 的顺序有讲究吗？',
 'Java基础',
 'public class CatchOrderTrap {
@@ -351,14 +351,17 @@ CREATE TABLE IF NOT EXISTS assistant_config (
 );
 
 INSERT INTO assistant_config (config_key, config_value, config_type, description) SELECT * FROM (VALUES
-('temperature', '0.7', 'double', 'AI回复的随机性，0-1之间，越高越随机'),
-('max_tokens', '2048', 'int', 'AI回复的最大token数'),
-('model', 'deepseek-chat', 'string', '使用的AI模型'),
-('system_prompt', '你是一个智能编程导师"小C"，可以帮助用户解决任何编程问题。回答要简洁有力、有针对性，不要泛泛而谈。当用户的问题不够具体时，主动询问细节。', 'text', '系统提示词'),
-('rag_enabled', 'true', 'boolean', '是否启用RAG知识检索'),
-('history_enabled', 'true', 'boolean', '是否使用对话历史'),
-('evolution_enabled', 'true', 'boolean', '是否启用自我进化功能'),
-('max_history_length', '20', 'int', '对话历史最大条数')
+ROW('vendor', 'deepseek', 'string', '模型厂商：deepseek/openai/siliconflow/ollama/custom'),
+ROW('api_key', '', 'string', '用户自定义的 API Key（支持任意 OpenAI 兼容厂商）'),
+ROW('base_url', 'https://api.deepseek.com', 'string', 'API 接口地址，默认为 DeepSeek，可改为任意 OpenAI 兼容地址'),
+ROW('model', 'deepseek-chat', 'string', '使用的 AI 模型名，可任意指定'),
+ROW('temperature', '0.7', 'double', 'AI回复的随机性，0-1之间，越高越随机'),
+ROW('max_tokens', '2048', 'int', 'AI回复的最大token数'),
+ROW('system_prompt', '你是一个智能编程导师"小C"，可以帮助用户解决任何编程问题。回答要简洁有力、有针对性，不要泛泛而谈。当用户的问题不够具体时，主动询问细节。', 'text', '系统提示词'),
+ROW('rag_enabled', 'true', 'boolean', '是否启用RAG知识检索'),
+ROW('history_enabled', 'true', 'boolean', '是否使用对话历史'),
+ROW('evolution_enabled', 'true', 'boolean', '是否启用自我进化功能'),
+ROW('max_history_length', '20', 'int', '对话历史最大条数')
 ) AS t (config_key, config_value, config_type, description)
 WHERE NOT EXISTS (SELECT 1 FROM assistant_config WHERE assistant_config.config_key = t.config_key);
 
@@ -421,6 +424,25 @@ CREATE TABLE IF NOT EXISTS evolution_insight (
 );
 
 
+-- ==================== 社区陷阱众包 ====================
+CREATE TABLE IF NOT EXISTS lab_community_trap (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(200) NOT NULL,
+    knowledge_point VARCHAR(200),
+    category VARCHAR(50) DEFAULT 'Java核心',
+    java_version VARCHAR(10) DEFAULT '17',
+    trap_code TEXT NOT NULL,
+    expected_pitfall VARCHAR(500),
+    correct_explanation TEXT,
+    hints TEXT,
+    difficulty INT DEFAULT 2,
+    submitter VARCHAR(100) DEFAULT 'anonymous',
+    status VARCHAR(20) DEFAULT 'PENDING',
+    vote_count INT DEFAULT 0,
+    gmt_create TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- ==================== 知识树节点进度 ====================
 CREATE TABLE IF NOT EXISTS lab_tree_progress (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -430,4 +452,251 @@ CREATE TABLE IF NOT EXISTS lab_tree_progress (
     gmt_create TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     gmt_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (node_id, user_id)
+);
+
+-- ==================== 团队版/企业版 ====================
+
+CREATE TABLE IF NOT EXISTS sys_organization (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    org_id VARCHAR(50) NOT NULL UNIQUE,
+    org_name VARCHAR(200) NOT NULL,
+    description TEXT,
+    plan_type VARCHAR(20) DEFAULT 'FREE',
+    max_members INT DEFAULT 10,
+    contact_email VARCHAR(200),
+    status VARCHAR(20) DEFAULT 'ACTIVE',
+    gmt_create TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS sys_user (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id VARCHAR(50) NOT NULL UNIQUE,
+    username VARCHAR(100) NOT NULL,
+    password_hash VARCHAR(255),
+    display_name VARCHAR(200),
+    email VARCHAR(200),
+    avatar VARCHAR(500),
+    role VARCHAR(20) DEFAULT 'MEMBER',
+    org_id VARCHAR(50),
+    status VARCHAR(20) DEFAULT 'ACTIVE',
+    last_login_time TIMESTAMP,
+    gmt_create TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS org_learning_record (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    org_id VARCHAR(50) NOT NULL,
+    user_id VARCHAR(50) NOT NULL,
+    record_date DATE NOT NULL,
+    questions_answered INT DEFAULT 0,
+    questions_correct INT DEFAULT 0,
+    code_executions INT DEFAULT 0,
+    scenarios_completed INT DEFAULT 0,
+    cards_viewed INT DEFAULT 0,
+    chat_messages INT DEFAULT 0,
+    study_duration_minutes INT DEFAULT 0,
+    gmt_create TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (org_id, user_id, record_date)
+);
+
+CREATE TABLE IF NOT EXISTS org_training_report (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    report_id VARCHAR(50) NOT NULL UNIQUE,
+    org_id VARCHAR(50) NOT NULL,
+    report_type VARCHAR(20) NOT NULL,
+    report_period_start DATE NOT NULL,
+    report_period_end DATE NOT NULL,
+    generated_by VARCHAR(50),
+    total_members INT DEFAULT 0,
+    active_members INT DEFAULT 0,
+    total_questions INT DEFAULT 0,
+    avg_accuracy DOUBLE DEFAULT 0,
+    top_students TEXT,
+    weak_topics TEXT,
+    summary_content TEXT,
+    gmt_create TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 插入默认组织
+INSERT INTO sys_organization (org_id, org_name, description, plan_type, max_members)
+SELECT 'default-org', '默认组织', '系统默认组织，所有用户归属于此', 'FREE', 100
+WHERE NOT EXISTS (SELECT 1 FROM sys_organization WHERE org_id = 'default-org');
+
+-- 插入默认管理员
+INSERT INTO sys_user (user_id, username, password_hash, display_name, role, org_id)
+SELECT 'admin', 'admin', '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9', '管理员', 'ROOT', 'default-org'
+WHERE NOT EXISTS (SELECT 1 FROM sys_user WHERE user_id = 'admin');
+
+-- ==================== 面试模式 ====================
+
+CREATE TABLE IF NOT EXISTS interview_config (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    config_id VARCHAR(50) NOT NULL UNIQUE,
+    title VARCHAR(200) NOT NULL,
+    description TEXT,
+    question_ids TEXT,
+    question_count INT DEFAULT 5,
+    time_limit_minutes INT DEFAULT 30,
+    difficulty_range VARCHAR(50),
+    categories VARCHAR(500),
+    passing_score INT DEFAULT 60,
+    created_by VARCHAR(50),
+    gmt_create TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS interview_session (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    session_id VARCHAR(50) NOT NULL UNIQUE,
+    config_id VARCHAR(50),
+    user_id VARCHAR(50) NOT NULL,
+    status VARCHAR(20) DEFAULT 'IN_PROGRESS',
+    current_question_index INT DEFAULT 0,
+    total_questions INT DEFAULT 0,
+    time_limit_minutes INT DEFAULT 30,
+    started_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    total_score INT DEFAULT 0,
+    max_score INT DEFAULT 100,
+    gmt_create TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS interview_answer (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    session_id VARCHAR(50) NOT NULL,
+    question_id BIGINT NOT NULL,
+    question_index INT NOT NULL,
+    user_code TEXT,
+    is_correct BOOLEAN,
+    ai_score INT,
+    ai_comment TEXT,
+    time_spent_seconds INT,
+    started_at TIMESTAMP,
+    submitted_at TIMESTAMP,
+    gmt_create TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS interview_report (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    report_id VARCHAR(50) NOT NULL UNIQUE,
+    session_id VARCHAR(50) NOT NULL,
+    user_id VARCHAR(50) NOT NULL,
+    total_score INT NOT NULL,
+    max_score INT NOT NULL,
+    accuracy DOUBLE,
+    total_time_seconds INT,
+    completed_questions INT,
+    avg_score_per_question DOUBLE,
+    strength_areas TEXT,
+    weak_areas TEXT,
+    ai_summary TEXT,
+    suggestions TEXT,
+    gmt_create TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ==================== 企业 API 密钥 ====================
+
+CREATE TABLE IF NOT EXISTS sys_api_key (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    api_key VARCHAR(100) NOT NULL UNIQUE,
+    org_id VARCHAR(50) NOT NULL,
+    key_name VARCHAR(200),
+    permission_scope VARCHAR(200),
+    allowed_ips TEXT,
+    expires_at TIMESTAMP,
+    status VARCHAR(20) DEFAULT 'ACTIVE',
+    last_used_at TIMESTAMP,
+    gmt_create TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS interview_candidate (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    candidate_id VARCHAR(50) NOT NULL UNIQUE,
+    org_id VARCHAR(50) NOT NULL,
+    name VARCHAR(100),
+    email VARCHAR(200),
+    phone VARCHAR(50),
+    resume_url VARCHAR(500),
+    position VARCHAR(200),
+    status VARCHAR(20) DEFAULT 'PENDING',
+    interview_session_id VARCHAR(50),
+    gmt_create TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ==================== 用户认证系统 ====================
+CREATE TABLE IF NOT EXISTS user_auth (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id VARCHAR(50) NOT NULL UNIQUE,
+    username VARCHAR(100) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    email VARCHAR(200),
+    avatar VARCHAR(500),
+    role VARCHAR(20) DEFAULT 'USER',
+    status VARCHAR(20) DEFAULT 'ACTIVE',
+    last_login_time TIMESTAMP,
+    gmt_create TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 插入默认管理员认证信息（用于登录，密码: admin123）
+INSERT INTO user_auth (user_id, username, password_hash, email, role, status)
+SELECT 'admin', 'admin', '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9', 'admin@cortex.com', 'ADMIN', 'ACTIVE'
+WHERE NOT EXISTS (SELECT 1 FROM user_auth WHERE user_id = 'admin');
+
+CREATE TABLE IF NOT EXISTS user_learning_profile (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id VARCHAR(50) NOT NULL UNIQUE,
+    total_study_hours DOUBLE DEFAULT 0,
+    total_questions_answered INT DEFAULT 0,
+    total_correct INT DEFAULT 0,
+    study_streak INT DEFAULT 0,
+    last_study_date DATE,
+    weak_areas VARCHAR(1000),
+    preferred_direction VARCHAR(500),
+    learning_goal VARCHAR(500),
+    skill_level VARCHAR(20) DEFAULT 'BEGINNER',
+    gmt_create TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS learning_report (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id VARCHAR(50) NOT NULL,
+    report_type VARCHAR(20) NOT NULL COMMENT 'WEEKLY/MONTHLY',
+    report_data TEXT NOT NULL,
+    period_start DATE NOT NULL,
+    period_end DATE NOT NULL,
+    gmt_create TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (user_id, report_type, period_start)
+);
+
+CREATE TABLE IF NOT EXISTS learning_daily_log (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id VARCHAR(50) NOT NULL,
+    log_date DATE NOT NULL,
+    questions_answered INT DEFAULT 0,
+    correct_count INT DEFAULT 0,
+    study_minutes INT DEFAULT 0,
+    knowledge_points_studied VARCHAR(1000),
+    gmt_create TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (user_id, log_date)
+);
+
+-- ==================== 通知设置 ====================
+CREATE TABLE IF NOT EXISTS user_notification_config (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id VARCHAR(50) NOT NULL UNIQUE,
+    email_notifications BOOLEAN DEFAULT FALSE,
+    email_address VARCHAR(200),
+    push_notifications BOOLEAN DEFAULT FALSE,
+    review_reminder BOOLEAN DEFAULT TRUE,
+    report_weekly BOOLEAN DEFAULT TRUE,
+    report_monthly BOOLEAN DEFAULT TRUE,
+    gmt_create TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

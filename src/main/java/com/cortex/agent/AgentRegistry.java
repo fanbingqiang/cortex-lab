@@ -10,6 +10,7 @@ import com.cortex.entity.UserProfile;
 import com.cortex.llm.LlmClient;
 import com.cortex.llm.LlmRequest;
 import com.cortex.llm.LlmResponse;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.alibaba.fastjson2.JSON;
 import cn.hutool.core.util.StrUtil;
 import lombok.RequiredArgsConstructor;
@@ -60,7 +61,8 @@ public class AgentRegistry {
                 .sorted((a, b) -> b.getPriority().compareTo(a.getPriority()))
                 .toList();
     }
-    
+
+
     public String executeAgent(String agentId, String input, String userId) {
         AgentMetadata agent = getAgent(agentId);
         if (agent == null) {
@@ -108,7 +110,8 @@ public class AgentRegistry {
     }
     
     private UserProfileDto getUserProfile(String userId) {
-        UserProfile profile = userProfileMapper.selectById(userId);
+        UserProfile profile = userProfileMapper.selectOne(
+            new LambdaQueryWrapper<UserProfile>().eq(UserProfile::getUserId, userId));
         if (profile == null) {
             return null;
         }

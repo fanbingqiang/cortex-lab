@@ -11,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -24,7 +25,8 @@ public class MemoryService {
     private final MistakeRecordMapper mistakeRecordMapper;
     
     public UserProfile getOrCreateProfile(String userId, String username) {
-        UserProfile profile = userProfileMapper.selectById(userId);
+        UserProfile profile = userProfileMapper.selectOne(
+            new LambdaQueryWrapper<UserProfile>().eq(UserProfile::getUserId, userId));
         if (profile == null) {
             profile = new UserProfile();
             profile.setUserId(userId);
@@ -38,9 +40,10 @@ public class MemoryService {
         }
         return profile;
     }
-    
+
     public UserProfileDto getProfile(String userId) {
-        UserProfile profile = userProfileMapper.selectById(userId);
+        UserProfile profile = userProfileMapper.selectOne(
+            new LambdaQueryWrapper<UserProfile>().eq(UserProfile::getUserId, userId));
         if (profile == null) {
             return null;
         }

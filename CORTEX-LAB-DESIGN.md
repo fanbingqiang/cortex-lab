@@ -141,21 +141,35 @@ CREATE TABLE lab_session (
 | MVP 限制 | 后续计划 |
 |----------|---------|
 | 前端为单 HTML 文件 | 迁移到 React + TypeScript |
-| 无 Docker 隔离 | Docker 容器沙箱 |
+| 无 Docker 隔离 | ✅ Docker 容器沙箱（已实现） |
 | 预置场景 | AI 动态生成场景 |
 | 简单对话逻辑 | 基于 LLM 的智能对话 |
 | 本地 H2 数据库 | MySQL + 用户系统 |
 
 ## 十、启动方式
 
+### 本地启动
 ```bash
 # 1. 配置 API Key
-set DEEPSEEK_API_KEY=your-key
+set LLM_API_KEY=your-key
 
 # 2. 启动后端
 mvn spring-boot:run
 # 或
 start.bat
+
+# 3. 访问 Lab
+http://localhost:8080/lab/index.html
+```
+
+### Docker 启动
+```bash
+# 1. 配置 API Key
+copy .env.example .env
+# 编辑 .env 填入 API Key
+
+# 2. 构建并启动
+docker compose up --build -d
 
 # 3. 访问 Lab
 http://localhost:8080/lab/index.html

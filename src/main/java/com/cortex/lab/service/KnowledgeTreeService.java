@@ -2,6 +2,7 @@ package com.cortex.lab.service;
 
 import com.alibaba.fastjson2.JSON;
 import com.cortex.lab.dto.KnowledgeNodeDTO;
+import com.cortex.lab.dto.ProjectInfoDTO;
 import com.cortex.lab.dto.ScenarioDto;
 import com.cortex.lab.entity.AssistantConfig;
 import com.cortex.lab.entity.LabScenario;
@@ -25,10 +26,12 @@ import java.util.concurrent.TimeUnit;
 @Service
 @RequiredArgsConstructor
 public class KnowledgeTreeService {
+    // 知识树服务：构建知识树、生成陷阱代码/Spring Boot 项目
 
     private final LabScenarioMapper scenarioMapper;
     private final LlmClient llmClient;
     private final AssistantConfigMapper configMapper;
+    private final SpringProjectService springProjectService;
 
     private final OkHttpClient httpClient = new OkHttpClient.Builder()
             .connectTimeout(60, TimeUnit.SECONDS)
@@ -36,6 +39,7 @@ public class KnowledgeTreeService {
             .writeTimeout(60, TimeUnit.SECONDS)
             .build();
 
+    // 获取完整知识树
     public List<KnowledgeNodeDTO> getTree() {
         List<KnowledgeNodeDTO> tree = new ArrayList<>();
 
@@ -49,7 +53,7 @@ public class KnowledgeTreeService {
             node("java-basics-static", "static关键字", "静态变量、静态方法、静态代码块的执行顺序"),
             node("java-basics-inner-class", "内部类", "成员内部类、静态内部类、匿名内部类、Lambda"),
             node("java-basics-interface", "接口与抽象类", "interface与abstract class的区别、default方法")
-        ), false));
+        ), false, null));
 
         // ==================== 面向对象 ====================
         tree.add(new KnowledgeNodeDTO("oop", "面向对象", "面向对象三大特性与设计原则", List.of(
@@ -57,14 +61,14 @@ public class KnowledgeTreeService {
             node("oop-extends", "继承与组合", "继承的优缺点、组合优先于继承、super关键字"),
             node("oop-singleton", "单例模式", "饿汉式、懒汉式、DCL、静态内部类、枚举单例"),
             node("oop-proxy", "代理模式", "静态代理、JDK动态代理、CGLIB代理的原理与区别")
-        ), false));
+        ), false, null));
 
         // ==================== 异常处理 ====================
         tree.add(new KnowledgeNodeDTO("exception", "异常处理", "Java异常机制与最佳实践", List.of(
             node("exception-try-finally", "try-catch-finally", "finally执行时机、return与finally的先后顺序"),
             node("exception-hierarchy", "异常继承体系", "Throwable、Error、Exception、RuntimeException的层次"),
             node("exception-checked", "受检异常与非受检异常", "checked/unchecked异常的区别、处理策略")
-        ), false));
+        ), false, null));
 
         // ==================== 集合框架 ====================
         tree.add(new KnowledgeNodeDTO("collection", "集合框架", "List、Map、Set及并发集合", List.of(
@@ -73,7 +77,7 @@ public class KnowledgeTreeService {
             node("collection-concurrent-hashmap", "ConcurrentHashMap", "分段锁/CAS、并发安全、size()实现"),
             node("collection-treemap", "TreeMap与Comparable", "红黑树结构、自然排序与定制排序、Comparator"),
             node("collection-queue", "Queue与Deque", "BlockingQueue、PriorityQueue、双端队列")
-        ), false));
+        ), false, null));
 
         // ==================== Java并发编程 ====================
         tree.add(new KnowledgeNodeDTO("concurrency", "Java并发编程", "多线程、锁、JUC工具类", List.of(
@@ -85,7 +89,7 @@ public class KnowledgeTreeService {
             node("concurrency-deadlock", "死锁与活锁", "死锁的必要条件、排查方法、预防策略"),
             node("concurrency-atomic", "Atomic原子类", "CAS原理、ABA问题、AtomicInteger/AtomicReference"),
             node("concurrency-completable-future", "CompletableFuture", "异步编程、thenApply/combine/allOf的用法")
-        ), false));
+        ), false, null));
 
         // ==================== JVM ====================
         tree.add(new KnowledgeNodeDTO("jvm", "JVM", "内存模型、GC、类加载", List.of(
@@ -95,16 +99,20 @@ public class KnowledgeTreeService {
             node("jvm-oom", "OOM分析", "堆溢出、栈溢出、元空间溢出、MAT分析"),
             node("jvm-classloader", "类加载机制", "双亲委派模型、加载/连接/初始化、自定义类加载器"),
             node("jvm-tuning", "JVM调优", "常用参数、GC日志分析、性能监控工具")
-        ), false));
+        ), false, null));
 
-        // ==================== Spring框架 ====================
+        // ==================== Spring框架（项目型） ====================
         tree.add(new KnowledgeNodeDTO("spring", "Spring框架", "IoC、AOP、MVC、Boot", List.of(
-            node("spring-ioc", "IoC容器", "Bean生命周期、依赖注入方式、循环依赖解决"),
-            node("spring-aop", "AOP原理", "JDK代理 vs CGLIB、@Aspect、切面执行顺序"),
+            projectNode("spring-ioc", "IoC容器", "Bean生命周期、依赖注入方式 — Spring Boot Maven 项目"),
+            projectNode("spring-aop", "AOP原理", "JDK代理 vs CGLIB、@Aspect — Spring Boot AOP 项目"),
+            projectNode("spring-mvc", "Spring MVC流程", "DispatcherServlet、HandlerMapping — Spring Boot Web 项目"),
             node("spring-transaction", "事务管理", "@Transactional传播行为、隔离级别、失效场景"),
-            node("spring-mvc", "Spring MVC流程", "DispatcherServlet、HandlerMapping、拦截器"),
+            node("spring-trap-transaction", "事务失效场景", "@Transactional私有方法、自调用、异常被捕获等失效场景"),
+            node("spring-trap-circular", "循环依赖", "构造器注入循环依赖与三级缓存原理"),
+            node("spring-trap-aop", "AOP失效场景", "自调用导致AOP失效、private方法不代理"),
+            node("spring-trap-scope", "Bean作用域陷阱", "Singleton注入Prototype失效、作用域混用问题"),
             node("spring-boot", "Spring Boot核心", "自动配置原理、@EnableAutoConfiguration、Starter机制")
-        ), false));
+        ), false, null));
 
         // ==================== 数据库与SQL ====================
         tree.add(new KnowledgeNodeDTO("database", "数据库与SQL", "MySQL、索引、事务、MyBatis", List.of(
@@ -114,7 +122,7 @@ public class KnowledgeTreeService {
             node("database-lock", "MySQL锁", "行锁、间隙锁、临键锁、意向锁、死锁"),
             node("database-sql-optimize", "SQL优化", "慢查询分析、explain解读、索引下推"),
             node("database-mybatis", "MyBatis", "一级/二级缓存、#{} vs ${}、插件原理")
-        ), false));
+        ), false, null));
 
         // ==================== 设计模式 ====================
         tree.add(new KnowledgeNodeDTO("design-pattern", "设计模式", "常用设计模式与应用场景", List.of(
@@ -123,14 +131,14 @@ public class KnowledgeTreeService {
             node("pattern-strategy", "策略模式", "策略模式的结构、与if-else的对比、Spring中的应用"),
             node("pattern-observer", "观察者模式", "发布订阅机制、事件驱动、Spring Event"),
             node("pattern-decorator", "装饰器模式", "增强已有功能、IO流中的装饰器应用")
-        ), false));
+        ), false, null));
 
         // ==================== 网络与IO ====================
         tree.add(new KnowledgeNodeDTO("net-io", "网络与IO", "IO模型、Netty、HTTP", List.of(
             node("io-bio-nio-aio", "BIO/NIO/AIO", "阻塞/非阻塞/异步IO的区别与适用场景"),
             node("io-netty", "Netty核心", "Reactor模型、EventLoop、ChannelPipeline"),
             node("io-zerocopy", "零拷贝", "传统IO vs mmap vs sendfile、Java实现")
-        ), false));
+        ), false, null));
 
         // ==================== 分布式 ====================
         tree.add(new KnowledgeNodeDTO("distributed", "分布式系统", "理论、缓存、消息队列", List.of(
@@ -138,11 +146,12 @@ public class KnowledgeTreeService {
             node("distributed-redis", "Redis", "数据结构、过期策略、持久化、分布式锁、缓存穿透/击穿/雪崩"),
             node("distributed-mq", "消息队列", "RocketMQ/Kafka架构、顺序消息、事务消息、幂等消费"),
             node("distributed-transaction", "分布式事务", "2PC、TCC、Seata、可靠消息最终一致性")
-        ), false));
+        ), false, null));
 
         return tree;
     }
 
+    // 切换节点的掌握状态
     public void toggleMastered(String nodeId, String userId, boolean mastered) {
         try {
             String key = "tree_mastered_" + userId + "_" + nodeId;
@@ -170,6 +179,7 @@ public class KnowledgeTreeService {
         }
     }
 
+    // 获取用户已掌握的节点ID列表
     public List<String> getMasteredNodeIds(String userId) {
         try {
             String prefix = "tree_mastered_" + userId + "_";
@@ -188,7 +198,11 @@ public class KnowledgeTreeService {
     }
 
     private static KnowledgeNodeDTO node(String id, String name, String description) {
-        return new KnowledgeNodeDTO(id, name, description, null, true);
+        return new KnowledgeNodeDTO(id, name, description, null, true, null);
+    }
+
+    private static KnowledgeNodeDTO projectNode(String id, String name, String description) {
+        return new KnowledgeNodeDTO(id, name, description, null, true, "project");
     }
 
     private static final Map<String, String> SCENARIO_MAP = Map.ofEntries(
@@ -197,9 +211,28 @@ public class KnowledgeTreeService {
         Map.entry("java-basics-passing", "为什么方法里改了 List，外面的 List 也变了？"),
         Map.entry("java-basics-equals", "HashMap 用 Person 做 key，为什么 get 不到值？"),
         Map.entry("exception-try-finally", "为什么 try 里 return 了，finally 还会执行？"),
-        Map.entry("exception-hierarchy", "异常捕获：多个 catch 的顺序有讲究吗？")
+        Map.entry("exception-hierarchy", "异常捕获：多个 catch 的顺序有讲究吗？"),
+        Map.entry("spring-trap-transaction", "@Transactional 失效：私有方法调用"),
+        Map.entry("spring-trap-circular", "循环依赖：构造器注入报错"),
+        Map.entry("spring-trap-aop", "AOP 失效：方法自调用"),
+        Map.entry("spring-trap-scope", "Singleton Bean 注入 Prototype Bean 失效")
     );
 
+    // 判断节点是否为项目类型
+    public boolean isProjectNode(String nodeId) {
+        KnowledgeNodeDTO found = findNode(getTree(), nodeId);
+        return found != null && "project".equals(found.getType());
+    }
+
+    // 生成 Spring Boot 项目
+    public ProjectInfoDTO generateProject(String nodeId) {
+        if (!isProjectNode(nodeId)) {
+            throw new RuntimeException("不是项目类型节点: " + nodeId);
+        }
+        return springProjectService.generateProject(nodeId);
+    }
+
+    // 根据知识点生成陷阱代码场景
     public ScenarioDto generateForNode(String nodeId) {
         List<KnowledgeNodeDTO> tree = getTree();
         KnowledgeNodeDTO found = findNode(tree, nodeId);
@@ -235,10 +268,10 @@ public class KnowledgeTreeService {
 
         // Try to generate via LLM (user-configured API key or env)
         try {
-            String userApiKey = getUserApiKey();
+            Map<String, String> llmConfig = getUserLlmConfig();
             String result;
-            if (userApiKey != null) {
-                result = callDeepSeekApi(userApiKey, buildPrompt(knowledgePoint, description));
+            if (llmConfig.get("api_key") != null) {
+                result = callLlmApi(llmConfig, buildPrompt(knowledgePoint, description));
             } else {
                 result = llmClient.chatSimple(buildPrompt(knowledgePoint, description));
             }
@@ -291,10 +324,14 @@ public class KnowledgeTreeService {
 
     private KnowledgeNodeDTO findNode(List<KnowledgeNodeDTO> nodes, String id) {
         for (KnowledgeNodeDTO node : nodes) {
-            if (id.equals(node.getId())) return node;
+            if (id.equals(node.getId())) {
+                return node;
+            }
             if (node.getChildren() != null) {
                 KnowledgeNodeDTO found = findNode(node.getChildren(), id);
-                if (found != null) return found;
+                if (found != null) {
+                    return found;
+                }
             }
         }
         return null;
@@ -337,29 +374,38 @@ public class KnowledgeTreeService {
         return dto;
     }
 
-    private String getUserApiKey() {
+    // 从 assistant_config 表读取用户自定义的 API 配置（api_key、base_url、model）
+    private Map<String, String> getUserLlmConfig() {
+        Map<String, String> cfg = new java.util.HashMap<>();
+        cfg.put("api_key", null);
+        cfg.put("base_url", "https://api.deepseek.com");
+        cfg.put("model", "deepseek-chat");
         try {
-            List<AssistantConfig> configs = configMapper.selectList(
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AssistantConfig>()
-                    .eq(AssistantConfig::getConfigKey, "deepseek_api_key")
-                    .last("LIMIT 1")
-            );
-            if (!configs.isEmpty()) {
-                String key = configs.get(0).getConfigValue();
-                if (key != null && !key.isBlank() && !key.equals("your-api-key-here")) {
-                    return key;
+            List<AssistantConfig> configs = configMapper.selectList(null);
+            for (AssistantConfig c : configs) {
+                String key = c.getConfigKey();
+                String val = c.getConfigValue();
+                if (("api_key".equals(key) || "base_url".equals(key) || "model".equals(key))
+                    && val != null && !val.isBlank() && !"your-api-key-here".equals(val)) {
+                    cfg.put(key, val);
                 }
             }
         } catch (Exception e) {
-            log.warn("读取API Key配置失败: {}", e.getMessage());
+            log.warn("读取LLM配置失败: {}", e.getMessage());
         }
-        return null;
+        return cfg;
     }
 
-    private String callDeepSeekApi(String apiKey, String prompt) {
-        String url = "https://api.deepseek.com/chat/completions";
+    private String callLlmApi(Map<String, String> llmConfig, String prompt) {
+        String apiKey = llmConfig.get("api_key");
+        String baseUrl = llmConfig.get("base_url");
+        String model = llmConfig.get("model");
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new RuntimeException("请先配置 API Key");
+        }
+        String url = baseUrl + "/chat/completions";
         String jsonBody = "{\n" +
-            "  \"model\": \"deepseek-chat\",\n" +
+            "  \"model\": " + JSON.toJSONString(model) + ",\n" +
             "  \"messages\": [{\"role\": \"user\", \"content\": " + JSON.toJSONString(prompt) + "}],\n" +
             "  \"temperature\": 0.7,\n" +
             "  \"max_tokens\": 4096\n" +

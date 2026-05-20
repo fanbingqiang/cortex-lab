@@ -1,34 +1,28 @@
 server:
-  port: 8080
+  port: 8081
 
 spring:
   datasource:
-    driver-class-name: org.h2.Driver
-    url: jdbc:h2:file:./data/cortex;AUTO_SERVER=TRUE
-    username: sa
-    password: 
-  h2:
-    console:
-      enabled: true
-      path: /h2-console
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:3306/cortex2?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&useUnicode=true&characterEncoding=UTF-8&connectionCollation=utf8mb4_unicode_ci&characterSetResults=UTF-8&sessionVariables=character_set_client=utf8mb4,character_set_connection=utf8mb4,character_set_results=utf8mb4
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:asdfghjkl123}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
   sql:
     init:
       mode: always
       encoding: UTF-8
 
 mybatis-plus:
-  mapper-locations: classpath:mapper/*.xml
   configuration:
     map-underscore-to-camel-case: true
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
 
 cortex:
   llm:
-    deepseek:
-      api-key: ${DEEPSEEK_API_KEY:your-api-key-here}
+    default-config:
+      api-key: ${LLM_API_KEY:your-api-key-here}
       base-url: https://api.deepseek.com
       model: deepseek-chat
-    gpt4o-mini:
-      api-key: ${OPENAI_API_KEY:your-api-key-here}
-      base-url: https://api.openai.com/v1
-      model: gpt-4o-mini

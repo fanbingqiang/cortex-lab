@@ -14,12 +14,16 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
+
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class AssistantService {
+    // 全局 AI 助手服务：支持对话、代码操作、RAG 检索、自我进化
 
     private final AssistantConfigMapper configMapper;
     private final AssistantConversationMapper conversationMapper;
@@ -31,7 +35,8 @@ public class AssistantService {
 
     private static final String SYSTEM_PROMPT = """
 你是一个智能编程导师"小C"，运行在代码练习平台 Cortex Lab 中。
-你可以回答编程问题，也可以执行平台操作。需要操作时在 action 中指定。
+你可以回答编程问题，也可以执行平台操作。用户可以要求你修改编辑器中的代码。
+需要操作时在 action 中指定；不需要时 action 设为 null。
 
 ## 回答原则
 - 简洁有针对性，不要啰嗦
@@ -44,6 +49,21 @@ public class AssistantService {
 - {"type":"loadToEditor","payload":题目ID} — 加载代码到编辑器
 - {"type":"runCode"} — 运行代码
 - {"type":"resetCode"} — 重置代码
+
+## 代码修改操作
+用户可以要求你直接修改编辑器中的代码。修改前先解释要改什么、为什么改，
+然后在 action 中返回修改操作。如果修改涉及多处，一次只改一处。
+
+1. modifyCode — 修改指定范围的代码
+   先解释修改内容，再用以下格式：
+   {"type":"modifyCode","payload":{"startLine":行号,"startCol":列号,"endLine":行号,"endCol":列号,"newText":"替换后的代码"}}
+   注意：行号从1开始，列号从1开始
+
+2. insertCode — 在指定位置插入代码
+   {"type":"insertCode","payload":{"line":行号,"col":列号,"text":"要插入的代码"}}
+
+3. deleteCode — 删除指定范围的代码
+   {"type":"deleteCode","payload":{"startLine":行号,"startCol":列号,"endLine":行号,"endCol":列号}}
 
 ## 题库列表
 %s
@@ -68,6 +88,7 @@ public class AssistantService {
 }
 """;
 
+    // AI 对话：构造上下文、调用 LLM、解析返回
     public GlobalChatResponse chat(GlobalChatRequest request) {
         Map<String, String> config = loadConfig();
 
@@ -96,7 +117,10 @@ public class AssistantService {
 
         try {
             String userContent = "用户说: " + request.getMessage();
-            String result = llmClient.chatSimple(systemPrompt, userContent);
+            String apiKey = config.getOrDefault("api_key", "");
+            String baseUrl = config.getOrDefault("base_url", "");
+            String model = config.getOrDefault("model", "deepseek-chat");
+            String result = llmClient.chatSimple(apiKey, baseUrl, model, systemPrompt, userContent);
 
             GlobalChatResponse response = parseResponse(result);
             response.setConversationId(conversationId);
@@ -123,10 +147,123 @@ public class AssistantService {
         }
     }
 
+    // 流式 SSE 聊天，逐步返回 AI 回复
+    public SseEmitter chatStream(GlobalChatRequest request) {
+        Map<String, String> config = loadConfig();
+        SseEmitter emitter = new SseEmitter(120000L);
+
+        String conversationId = request.getConversationId();
+        if (conversationId == null || conversationId.isBlank()) {
+            conversationId = UUID.randomUUID().toString();
+            createConversation(conversationId, request.getUserId(), request.getMessage());
+        }
+
+        saveMessage(conversationId, "user", request.getMessage(), null);
+
+        String questionList = buildQuestionList();
+        String codeContext = buildCodeContext(request);
+        String ragContext = buildRagContext(request.getMessage(), config);
+        String evolutionContext = buildEvolutionContext(config);
+        String history = buildHistory(conversationId, config);
+
+        String systemPrompt = SYSTEM_PROMPT.formatted(
+            questionList, codeContext, ragContext, evolutionContext,
+            config.getOrDefault("max_history_length", "20"), history
+        );
+
+        String apiKey = config.getOrDefault("api_key", "");
+        String baseUrl = config.getOrDefault("base_url", "");
+        String model = config.getOrDefault("model", "deepseek-chat");
+
+        StringBuilder fullContent = new StringBuilder();
+        final String convId = conversationId;
+
+        CompletableFuture.runAsync(() -> {
+            try {
+                String userContent = "用户说: " + request.getMessage();
+                LlmRequest llmReq = new LlmRequest();
+                llmReq.setModel(model);
+                llmReq.setMessages(List.of(
+                    new LlmRequest.Message("system", systemPrompt),
+                    new LlmRequest.Message("user", userContent)
+                ));
+                llmReq.setTemperature(Double.parseDouble(config.getOrDefault("temperature", "0.7")));
+                llmReq.setMaxTokens(Integer.parseInt(config.getOrDefault("max_tokens", "2048")));
+
+                llmClient.chatStream(apiKey, baseUrl, model, llmReq,
+                    chunk -> {
+                        fullContent.append(chunk);
+                        try {
+                            emitter.send(SseEmitter.event()
+                                .name("chunk")
+                                .data(chunk));
+                        } catch (Exception e) {
+                            // client disconnected
+                        }
+                    },
+                    () -> {
+                        try {
+                            String fullReply = fullContent.toString();
+                            // Save the assistant message
+                            saveMessage(convId, "assistant", fullReply, null);
+                            updateConversationCount(convId);
+
+                            // Try to parse action/suggestions from the full response
+                            GlobalChatResponse parsed = parseResponse(fullReply);
+
+                            // Send final metadata event
+                            java.util.Map<String, Object> meta = new java.util.HashMap<>();
+                            meta.put("conversationId", convId);
+                            meta.put("suggestions", parsed.getSuggestions() != null ? parsed.getSuggestions() : new java.util.ArrayList<>());
+                            meta.put("action", parsed.getAction());
+
+                            emitter.send(SseEmitter.event()
+                                .name("metadata")
+                                .data(JSON.toJSONString(meta)));
+
+                            emitter.complete();
+
+                            if (fullReply != null && !fullReply.isBlank()) {
+                                evolutionService.extractInsightFromConversation(convId,
+                                    List.of(request.getMessage(), fullReply));
+                                evolutionService.indexKnowledgeCards(convId, request.getMessage(), fullReply);
+                            }
+                        } catch (Exception e) {
+                            log.warn("流式完成处理异常", e);
+                            emitter.complete();
+                        }
+                    },
+                    error -> {
+                        try {
+                            emitter.send(SseEmitter.event()
+                                .name("error")
+                                .data(error.getMessage()));
+                        } catch (Exception e2) {
+                            // ignore
+                        }
+                        emitter.completeWithError(error);
+                    }
+                );
+            } catch (Exception e) {
+                log.error("流式AI对话失败", e);
+                try {
+                    emitter.send(SseEmitter.event()
+                        .name("error")
+                        .data("AI对话失败: " + e.getMessage()));
+                } catch (Exception e2) {}
+                emitter.completeWithError(e);
+            }
+        });
+
+        return emitter;
+    }
+
+    // 提交对话反馈，用于自我进化
     public void submitFeedback(String conversationId, Long messageId, String userId, int rating, String comment) {
         evolutionService.recordFeedback(conversationId, messageId, userId, rating, comment);
     }
 
+    // 加载助手配置（api_key, model, temperature 等）
     public Map<String, String> loadConfig() {
         Map<String, String> config = new HashMap<>();
         try {
@@ -139,6 +276,7 @@ public class AssistantService {
             config.put("temperature", "0.7");
             config.put("max_tokens", "2048");
             config.put("model", "deepseek-chat");
+            config.put("base_url", "https://api.deepseek.com");
             config.put("system_prompt", "你是一个智能编程导师");
             config.put("rag_enabled", "true");
             config.put("history_enabled", "true");
@@ -148,9 +286,11 @@ public class AssistantService {
         if (!config.containsKey("temperature")) config.put("temperature", "0.7");
         if (!config.containsKey("max_tokens")) config.put("max_tokens", "2048");
         if (!config.containsKey("model")) config.put("model", "deepseek-chat");
+        if (!config.containsKey("base_url")) config.put("base_url", "https://api.deepseek.com");
         return config;
     }
 
+    // 更新助手配置
     public Map<String, String> updateConfig(Map<String, String> updates) {
         for (Map.Entry<String, String> entry : updates.entrySet()) {
             String key = entry.getKey();
@@ -180,6 +320,7 @@ public class AssistantService {
         return loadConfig();
     }
 
+    // 获取用户的对话列表
     public List<AssistantConversation> listConversations(String userId) {
         return conversationMapper.selectList(
             new LambdaQueryWrapper<AssistantConversation>()
@@ -190,6 +331,7 @@ public class AssistantService {
         );
     }
 
+    // 获取对话的消息列表
     public List<AssistantMessage> getMessages(String conversationId) {
         return messageMapper.selectList(
             new LambdaQueryWrapper<AssistantMessage>()
@@ -369,6 +511,7 @@ public class AssistantService {
         return response;
     }
 
+    // 软删除对话
     public void deleteConversation(String conversationId) {
         try {
             AssistantConversation conv = conversationMapper.selectOne(

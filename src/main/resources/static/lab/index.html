@@ -124,10 +124,19 @@
     <span class="nav-tab active" data-tab="practice" onclick="switchTab('practice')">🎯 实战练习</span>
     <span class="nav-tab" data-tab="questions" onclick="switchTab('questions')">📚 题库</span>
     <span class="nav-tab" data-tab="cards" onclick="switchTab('cards')">📇 知识卡片</span>
+    <span class="nav-tab" data-tab="community" onclick="switchTab('community')">🤝 社区陷阱</span>
     <span class="nav-tab" data-tab="progress" onclick="switchTab('progress')">📊 进度管理</span>
+    <span class="nav-tab" data-tab="reports" onclick="switchTab('reports')">📈 学习报告</span>
+    <span class="nav-tab" onclick="window.location.href='/admin/index.html'" style="background:var(--primary-light);color:var(--primary);">⚙️ 管理后台</span>
+    <span class="nav-tab" onclick="window.location.href='/interview/index.html'" style="color:var(--warning);">🎤 面试模式</span>
     <div style="flex:1"></div>
     <button class="btn btn-ghost btn-sm" onclick="toggleTreePanel()" title="知识树" style="font-size:16px;padding:4px 10px;">🌳</button>
     <span style="font-size:12px;color:var(--muted);" id="status-badge">就绪</span>
+    <div id="user-area" style="display:flex;align-items:center;gap:8px;">
+      <span id="user-display" style="font-size:12px;color:var(--muted);display:none;"></span>
+      <button class="btn btn-sm btn-outline" id="auth-btn" onclick="showAuthModal()" style="font-size:12px;padding:4px 12px;">登录</button>
+      <button class="btn btn-sm btn-ghost" id="logout-btn" onclick="doLogout()" style="font-size:12px;padding:4px 12px;display:none;">退出</button>
+    </div>
   </div>
 
   <div class="main">
@@ -152,10 +161,12 @@
         <div class="editor-panel" style="flex:1;">
           <div class="editor-header">
             <span id="scenario-info" style="font-size:12px;color:var(--muted);">🌳 从左侧知识树选择一个知识点</span>
+            <div id="project-controls" style="display:none;flex:1;font-size:11px;color:var(--muted);"></div>
             <div style="flex:1"></div>
-            <button class="btn btn-primary" onclick="runCode()">▶ 运行代码</button>
+            <button class="btn btn-primary" id="run-btn" onclick="runCode()">▶ 运行代码</button>
             <button class="btn btn-outline" onclick="resetCode()">↺ 重置</button>
           </div>
+          <div id="project-file-tabs" style="display:none;background:var(--bg);border-bottom:1px solid var(--border);padding:4px 8px;overflow-x:auto;white-space:nowrap;"></div>
           <div id="editor-container"></div>
           <div class="terminal-panel">
             <div class="terminal-label">输出终端</div>
@@ -170,8 +181,16 @@
             <button class="btn btn-ghost btn-sm" onclick="toggleConfig()" title="参数设置">⚙️</button>
           </div>
           <div class="config-panel" id="config-panel">
+            <div class="config-row"><label>模型厂商</label><select id="cfg-vendor" onchange="onVendorChange()" style="flex:1;font-size:12px;">
+              <option value="deepseek">DeepSeek</option>
+              <option value="openai">OpenAI</option>
+              <option value="siliconflow">SiliconFlow</option>
+              <option value="ollama">Ollama（本地）</option>
+              <option value="custom">自定义</option>
+            </select></div>
             <div class="config-row"><label>API Key</label><input type="password" id="cfg-apikey" placeholder="sk-..." onchange="saveConfig()" style="flex:1;font-size:12px;"></div>
-            <div class="config-row"><label>模型</label><select id="cfg-model" onchange="saveConfig()"><option value="deepseek-chat">DeepSeek Chat</option><option value="gpt-4o-mini">GPT-4o Mini</option></select></div>
+            <div class="config-row"><label>接口地址</label><input type="text" id="cfg-baseurl" placeholder="https://api.deepseek.com" onchange="saveConfig()" style="flex:1;font-size:12px;"></div>
+            <div class="config-row"><label>模型</label><input type="text" id="cfg-model" placeholder="deepseek-chat" onchange="saveConfig()" style="flex:1;font-size:12px;"></div>
             <div class="config-row"><label>温度</label><input type="range" id="cfg-temp" min="0" max="1" step="0.1" value="0.7" onchange="saveConfig()"><span id="cfg-temp-val" style="font-size:11px;min-width:30px;">0.7</span></div>
             <div class="config-row"><label>最大Token</label><input type="number" id="cfg-tokens" value="2048" min="256" max="8192" step="256" onchange="saveConfig()" style="width:100px;"></div>
             <div class="config-row"><label>RAG</label><select id="cfg-rag" onchange="saveConfig()"><option value="true">开启</option><option value="false">关闭</option></select></div>
@@ -222,7 +241,51 @@
           <h2 style="font-size:18px;font-weight:600;margin:0;">📇 知识卡片</h2>
           <span style="font-size:12px;color:var(--muted);" id="card-count">0 张</span>
         </div>
-        <div id="card-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;"></div>
+        <div id="card-list" style="display:flex;flex-direction:column;gap:10px;"></div>
+      </div>
+    </div>
+
+    <!-- ============ Community Tab ============ -->
+    <div class="tab-content" id="tab-community">
+      <div style="width:360px;min-width:360px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;">
+        <div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:10px;">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:space-between;">
+            <button class="btn btn-primary btn-sm" onclick="showCommunitySubmitModal()">✏️ 提交陷阱</button>
+            <span style="font-size:11px;color:var(--muted);align-self:center;" id="community-count">0 个陷阱</span>
+          </div>
+          <!-- Java Version Filter -->
+          <div style="display:flex;gap:4px;flex-wrap:wrap;">
+            <span style="font-size:11px;color:var(--muted);min-width:32px;line-height:24px;">版本:</span>
+            <span class="tab-btn active" data-ver="all" onclick="filterCommunityVersion(this)">全部</span>
+            <span class="tab-btn" data-ver="8" onclick="filterCommunityVersion(this)">Java 8</span>
+            <span class="tab-btn" data-ver="11" onclick="filterCommunityVersion(this)">Java 11</span>
+            <span class="tab-btn" data-ver="17" onclick="filterCommunityVersion(this)">Java 17</span>
+            <span class="tab-btn" data-ver="21" onclick="filterCommunityVersion(this)">Java 21</span>
+          </div>
+          <!-- Category Filter -->
+          <div style="display:flex;gap:4px;flex-wrap:wrap;">
+            <span style="font-size:11px;color:var(--muted);min-width:32px;line-height:24px;">分类:</span>
+            <span class="tab-btn active" data-cat="all" onclick="filterCommunityCategory(this)">全部</span>
+            <span class="tab-btn" data-cat="Java核心" onclick="filterCommunityCategory(this)">Java核心</span>
+            <span class="tab-btn" data-cat="Spring项目" onclick="filterCommunityCategory(this)">Spring项目</span>
+          </div>
+          <!-- Status Filter -->
+          <div style="display:flex;gap:4px;flex-wrap:wrap;">
+            <span style="font-size:11px;color:var(--muted);min-width:32px;line-height:24px;">状态:</span>
+            <span class="tab-btn active" data-sta="all" onclick="filterCommunityStatus(this)">全部</span>
+            <span class="tab-btn" data-sta="APPROVED" onclick="filterCommunityStatus(this)">已通过</span>
+            <span class="tab-btn" data-sta="PENDING" onclick="filterCommunityStatus(this)">待审核</span>
+            <span class="tab-btn" data-sta="REJECTED" onclick="filterCommunityStatus(this)">已拒绝</span>
+          </div>
+        </div>
+        <div class="scroll-y" style="flex:1;" id="community-list"></div>
+      </div>
+      <div class="detail-panel" style="flex:1;" id="community-detail">
+        <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);flex-direction:column;gap:8px;">
+          <div style="font-size:40px;">🤝</div>
+          <div>社区陷阱众包 — 提交、分享、学习</div>
+          <div style="font-size:12px;">左侧选择一个社区陷阱，或点击「提交陷阱」贡献你的代码</div>
+        </div>
       </div>
     </div>
 
@@ -237,6 +300,69 @@
           <span class="tab-btn" onclick="switchReviewTab(this,'all')">📋 全部</span>
         </div>
         <div id="review-list"></div>
+      </div>
+    </div>
+
+    <!-- ============ Reports Tab ============ -->
+    <div class="tab-content" id="tab-reports">
+      <div style="flex:1;overflow-y:auto;padding:20px 24px;max-width:960px;margin:0 auto;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+          <h2 style="font-size:18px;font-weight:600;margin:0;">📈 学习报告</h2>
+          <div style="display:flex;gap:8px;">
+            <button class="tab-btn active" onclick="switchReportType(this,'WEEKLY')" id="report-weekly-btn">📅 周报</button>
+            <button class="tab-btn" onclick="switchReportType(this,'MONTHLY')" id="report-monthly-btn">📅 月报</button>
+          </div>
+        </div>
+        <div id="report-content" style="text-align:center;padding:60px 20px;color:var(--muted);">
+          请先<a href="#" onclick="showAuthModal()" style="color:var(--primary);">登录</a>后查看学习报告
+        </div>
+        <!-- Report data will be rendered here by JS -->
+        <div id="report-data" style="display:none;">
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:24px;" id="report-summary-cards"></div>
+          <div style="margin-bottom:24px;">
+            <h3 style="font-size:15px;font-weight:600;margin:0 0 12px;">每日学习情况</h3>
+            <div id="report-daily-chart" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;min-height:200px;"></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px;">
+            <div>
+              <h3 style="font-size:15px;font-weight:600;margin:0 0 12px;">分类掌握情况</h3>
+              <div id="report-categories" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;"></div>
+            </div>
+            <div>
+              <h3 style="font-size:15px;font-weight:600;margin:0 0 12px;">薄弱知识点</h3>
+              <div id="report-weaknesses" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;"></div>
+            </div>
+          </div>
+          <div style="margin-bottom:24px;">
+            <h3 style="font-size:15px;font-weight:600;margin:0 0 12px;">进步趋势</h3>
+            <div id="report-trend" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;min-height:200px;"></div>
+          </div>
+          <div style="margin-bottom:24px;">
+            <h3 style="font-size:15px;font-weight:600;margin:0 0 12px;">学习建议</h3>
+            <div id="report-recommendations" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;"></div>
+          </div>
+          <div style="margin-bottom:24px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+              <h3 style="font-size:15px;font-weight:600;margin:0;">学习画像分析</h3>
+              <button class="btn btn-sm btn-outline" onclick="loadProfileAnalysis()" style="font-size:12px;">AI 分析学习方向</button>
+            </div>
+            <div id="report-profile-analysis" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;display:none;"></div>
+          </div>
+          <div style="margin-bottom:24px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+              <h3 style="font-size:15px;font-weight:600;margin:0;">个性化测验</h3>
+              <button class="btn btn-sm btn-outline" onclick="loadProfileQuestions()" style="font-size:12px;">生成测验题</button>
+            </div>
+            <div id="report-questions" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;display:none;"></div>
+          </div>
+          <div style="margin-bottom:24px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+              <h3 style="font-size:15px;font-weight:600;margin:0;">通知设置</h3>
+              <button class="btn btn-sm btn-outline" onclick="loadNotificationConfig()" style="font-size:12px;">设置</button>
+            </div>
+            <div id="report-notifications" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;display:none;"></div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -256,6 +382,38 @@
       <button class="btn btn-primary" onclick="batchImport()">🚀 批量导入</button>
     </div>
     <div id="batch-status" style="margin-top:8px;font-size:12px;color:var(--muted);"></div>
+  </div>
+</div>
+
+<!-- ============ Login/Register Modal ============ -->
+<div id="auth-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeAuthModal()">
+  <div class="modal-box" style="max-width:400px;position:relative;">
+    <button class="modal-close" onclick="closeAuthModal()">&times;</button>
+    <div id="auth-login-form">
+      <h3 style="margin:0 0 16px;font-size:18px;">登录</h3>
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        <input id="login-username" placeholder="用户名" style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;outline:none;">
+        <input id="login-password" type="password" placeholder="密码" style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;outline:none;" onkeydown="if(event.key==='Enter')doLogin()">
+        <button class="btn btn-primary" onclick="doLogin()" style="padding:10px;font-size:14px;">登录</button>
+        <div style="text-align:center;font-size:13px;color:var(--muted);">
+          还没有账号？<a href="#" onclick="showRegisterForm()" style="color:var(--primary);">立即注册</a>
+        </div>
+        <div id="auth-error" style="font-size:13px;color:var(--danger);text-align:center;"></div>
+      </div>
+    </div>
+    <div id="auth-register-form" style="display:none;">
+      <h3 style="margin:0 0 16px;font-size:18px;">注册</h3>
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        <input id="reg-username" placeholder="用户名" style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;outline:none;">
+        <input id="reg-email" placeholder="邮箱（选填）" style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;outline:none;">
+        <input id="reg-password" type="password" placeholder="密码" style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;outline:none;" onkeydown="if(event.key==='Enter')doRegister()">
+        <button class="btn btn-primary" onclick="doRegister()" style="padding:10px;font-size:14px;">注册</button>
+        <div style="text-align:center;font-size:13px;color:var(--muted);">
+          已有账号？<a href="#" onclick="showLoginForm()" style="color:var(--primary);">去登录</a>
+        </div>
+        <div id="reg-error" style="font-size:13px;color:var(--danger);text-align:center;"></div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -292,6 +450,53 @@
   </div>
 </div>
 
+<!-- ============ Community Submit Modal ============ -->
+<div id="community-submit-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeModal('community-submit-modal')">
+  <div class="modal-box" style="max-width:800px;position:relative;">
+    <button class="modal-close" onclick="closeModal('community-submit-modal')">&times;</button>
+    <h3 style="margin:0 0 8px;">✏️ 提交社区陷阱代码</h3>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 12px;">贡献你的 Java 陷阱代码，帮助其他开发者学习。提交后需审核通过才会公开展示。</p>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <div style="display:flex;gap:10px;">
+        <input id="com-title" placeholder="陷阱标题（如：@Transactional 失效：私有方法调用）" style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;outline:none;">
+      </div>
+      <div style="display:flex;gap:10px;">
+        <input id="com-knowledge" placeholder="知识点（如：Spring事务管理）" style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;outline:none;">
+        <select id="com-version" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg);color:var(--text);">
+          <option value="8">Java 8</option>
+          <option value="11">Java 11</option>
+          <option value="17" selected>Java 17</option>
+          <option value="21">Java 21</option>
+        </select>
+        <select id="com-category" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg);color:var(--text);">
+          <option value="Java核心">Java核心</option>
+          <option value="Spring项目">Spring项目</option>
+        </select>
+      </div>
+      <textarea id="com-code" placeholder="陷阱代码（完整的可编译 Java 代码）" style="width:100%;min-height:180px;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:12px;outline:none;resize:vertical;font-family:monospace;background:#1e293b;color:#e2e8f0;"></textarea>
+      <div style="display:flex;gap:10px;">
+        <input id="com-pitfall" placeholder="预期陷阱（一句话描述学习者会看到什么）" style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;outline:none;">
+      </div>
+      <textarea id="com-explanation" placeholder="正确原理解释（为什么会有陷阱，200字以内）" style="width:100%;min-height:60px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;outline:none;resize:vertical;"></textarea>
+      <input id="com-hints" placeholder="提示（用 | 分隔，如：提示1 | 提示2 | 提示3）" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;outline:none;">
+      <div style="display:flex;gap:10px;">
+        <select id="com-difficulty" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg);color:var(--text);">
+          <option value="1">难度：简单</option>
+          <option value="2" selected>难度：中等</option>
+          <option value="3">难度：困难</option>
+          <option value="4">难度：地狱</option>
+        </select>
+        <input id="com-submitter" placeholder="你的昵称" value="anonymous" style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;outline:none;">
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end;">
+      <button class="btn btn-ghost" onclick="closeModal('community-submit-modal')">取消</button>
+      <button class="btn btn-primary" onclick="submitCommunityTrap()">🚀 提交</button>
+    </div>
+    <div id="com-status" style="margin-top:8px;font-size:12px;color:var(--muted);"></div>
+  </div>
+</div>
+
 <script>
 // ====================== State ======================
 let editor = null;
@@ -300,6 +505,7 @@ let sessionId = null;
 let originalCode = '';
 let questionsList = [];
 let selectedQuestionId = null;
+let selectedCardId = null;
 let currentTab = 'practice';
 const USER_ID = 'anonymous';
 
@@ -314,6 +520,28 @@ let currentKnowledgePoint = '';
 
 // Tree mastery state
 let treeMasteredNodes = new Set();
+
+// ====================== Toast ======================
+function showToast(msg, duration) {
+  duration = duration || 2000;
+  let t = document.getElementById('toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'toast';
+    t.style.cssText = 'position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:#1e293b;color:white;padding:10px 24px;border-radius:8px;font-size:13px;z-index:9999;animation:fadeIn 0.3s;max-width:80%;text-align:center;';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.display = 'block';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => { t.style.display = 'none'; }, duration);
+}
+
+// Spring Boot project state
+let currentProjectFiles = null;
+let currentProjectDir = '';
+let currentFilePath = '';
+let isProjectMode = false;
 
 // ====================== Monaco Init ======================
 require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs' } });
@@ -348,12 +576,31 @@ require(['vs/editor/editor.main'], function() {
   });
 });
 
+// ====================== Auth Helpers ======================
+function getToken() { return localStorage.getItem('auth_token'); }
+function getUserId() { return localStorage.getItem('user_id') || 'anonymous'; }
+function getUsername() { return localStorage.getItem('username') || ''; }
+function isLoggedIn() { return !!getToken(); }
+function getAuthHeaders() {
+  const headers = { 'Content-Type': 'application/json' };
+  const token = getToken();
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  return headers;
+}
+
 // ====================== API ======================
 const API = '/api/lab';
+const AUTH_API = '/api/auth';
 async function api(method, path, body) {
-  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  const opts = { method, headers: getAuthHeaders() };
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(API + path, opts);
+  return res.json();
+}
+async function authApi(method, path, body) {
+  const opts = { method, headers: getAuthHeaders() };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(AUTH_API + path, opts);
   return res.json();
 }
 
@@ -365,6 +612,7 @@ function switchTab(tab) {
   if (tab === 'questions') loadQuestions();
   if (tab === 'cards') loadCards();
   if (tab === 'progress') loadProgress();
+  if (tab === 'community') loadCommunityTraps();
   if (tab === 'practice' && editor) setTimeout(() => editor.layout(), 100);
 }
 
@@ -377,44 +625,97 @@ async function sendGlobalChat() {
   input.value = '';
   input.disabled = true;
   addGlobalMsg('user', msg);
-  addGlobalMsg('ai', '<span class="loading"></span><span class="loading"></span><span class="loading"></span>', true);
+
+  // Create streaming message container
+  const msgDiv = document.createElement('div');
+  msgDiv.className = 'chat-msg ai';
+  msgDiv.id = 'global-streaming-msg';
+  const box = document.getElementById('global-chat-messages');
+  box.appendChild(msgDiv);
+  box.scrollTop = box.scrollHeight;
 
   try {
-    const res = await api('POST', '/assistant/chat', {
-      conversationId: globalConvId,
-      message: msg,
-      userId: USER_ID,
-      currentCode: editor ? editor.getValue() : '',
-      knowledgePoint: currentKnowledgePoint || ''
+    const response = await fetch(API + '/assistant/chat/stream', {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({
+        conversationId: globalConvId,
+        message: msg,
+        userId: getUserId(),
+        currentCode: editor ? editor.getValue() : '',
+        knowledgePoint: currentKnowledgePoint || ''
+      })
     });
-    removeGlobalTempMsg();
 
-    if (res.code === 200 && res.data) {
-      const d = res.data;
-      globalConvId = d.conversationId;
-
-      let replyHtml = esc(d.reply || '(AI回复)');
-
-      // Execute AI action if present
-      if (d.action && d.action.type) {
-        executeAiAction(d.action);
-      }
-
-      const msgId = addGlobalMsg('ai', replyHtml);
-
-      if (d.suggestions && d.suggestions.length > 0) {
-        addGlobalSuggestions(d.suggestions);
-      }
-
-      addGlobalFeedback(msgId, d.conversationId);
-
-      loadConversations();
-    } else {
-      addGlobalMsg('ai', '抱歉，我暂时无法回答。请稍后再试。');
+    if (!response.ok) {
+      msgDiv.textContent = '请求失败: ' + response.status;
+      input.disabled = false;
+      input.focus();
+      return;
     }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let replyText = '';
+    let buffer = '';
+    let currentEvent = '';
+    let convId = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      // Parse SSE lines
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+      for (const line of lines) {
+        if (line.startsWith('event:')) {
+          currentEvent = line.substring(6).trim();
+        } else if (line.startsWith('data:')) {
+          const data = line.substring(5).trim();
+
+          if (currentEvent === 'chunk') {
+            replyText += data;
+            // Escape HTML for safe display
+            const escaped = replyText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            msgDiv.innerHTML = escaped;
+            box.scrollTop = box.scrollHeight;
+          } else if (currentEvent === 'metadata') {
+            try {
+              const meta = JSON.parse(data);
+              convId = meta.conversationId || convId;
+              if (meta.suggestions && meta.suggestions.length > 0) {
+                addGlobalSuggestions(meta.suggestions);
+              }
+              if (meta.action && meta.action.type) {
+                executeAiAction(meta.action);
+              }
+            } catch (e) {
+              console.warn('Metadata parse error:', e);
+            }
+          } else if (currentEvent === 'error') {
+            msgDiv.textContent = '错误: ' + data;
+          } else if (!currentEvent) {
+            // Plain SSE (data only, no event name) - could be direct text
+            replyText += data;
+            const escaped = replyText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            msgDiv.innerHTML = escaped;
+            box.scrollTop = box.scrollHeight;
+          }
+        }
+      }
+    }
+
+    msgDiv.id = '';
+    if (convId) globalConvId = convId;
+    if (convId) addGlobalFeedback(msgDiv, convId);
+    loadConversations();
+
   } catch (e) {
-    removeGlobalTempMsg();
-    addGlobalMsg('ai', '网络错误，请检查连接后重试');
+    msgDiv.textContent = '网络错误，请检查连接后重试';
     console.error(e);
   }
 
@@ -433,19 +734,6 @@ function addGlobalMsg(role, content, isTemp) {
   box.appendChild(div);
   box.scrollTop = box.scrollHeight;
   return div;
-}
-
-function removeGlobalTempMsg() {
-  const t = document.getElementById('global-temp-msg');
-  if (t) t.remove();
-  const box = document.getElementById('global-chat-messages');
-  const msgs = box.querySelectorAll('.chat-msg.ai');
-  for (let i = msgs.length - 1; i >= 0; i--) {
-    if (msgs[i].querySelector('.loading')) {
-      msgs[i].remove();
-      break;
-    }
-  }
 }
 
 function executeAiAction(action) {
@@ -469,6 +757,42 @@ function executeAiAction(action) {
       break;
     case 'resetCode':
       resetCode();
+      break;
+    case 'modifyCode':
+      if (action.payload && editor) {
+        const p = action.payload;
+        if (confirm('AI 建议修改代码，是否应用修改？\n\n修改位置: 第 ' + p.startLine + ' 行 ~ 第 ' + p.endLine + ' 行')) {
+          editor.executeEdits('ai-modify', [{
+            range: new monaco.Range(p.startLine, p.startCol, p.endLine, p.endCol),
+            text: p.newText || ''
+          }]);
+          showToast('代码已修改');
+        }
+      }
+      break;
+    case 'insertCode':
+      if (action.payload && editor) {
+        const p = action.payload;
+        if (confirm('AI 建议在第 ' + p.line + ' 行插入代码，是否应用？')) {
+          editor.executeEdits('ai-insert', [{
+            range: new monaco.Range(p.line, p.col, p.line, p.col),
+            text: p.text || ''
+          }]);
+          showToast('代码已插入');
+        }
+      }
+      break;
+    case 'deleteCode':
+      if (action.payload && editor) {
+        const p = action.payload;
+        if (confirm('AI 建议删除第 ' + p.startLine + ' 行 ~ 第 ' + p.endLine + ' 行代码，是否应用？')) {
+          editor.executeEdits('ai-delete', [{
+            range: new monaco.Range(p.startLine, p.startCol, p.endLine, p.endCol),
+            text: ''
+          }]);
+          showToast('代码已删除');
+        }
+      }
       break;
   }
 }
@@ -519,12 +843,393 @@ async function rateMessage(btn, convId, rating) {
     await api('POST', '/assistant/feedback', {
       conversationId: convId,
       rating: rating,
-      userId: USER_ID
+      userId: getUserId()
     });
   } catch (e) { console.error(e); }
 }
 
+// ====================== Auth System ======================
+function showAuthModal() {
+  document.getElementById('auth-modal').style.display = 'flex';
+  document.getElementById('auth-login-form').style.display = 'block';
+  document.getElementById('auth-register-form').style.display = 'none';
+  document.getElementById('auth-error').textContent = '';
+  document.getElementById('reg-error').textContent = '';
+}
+function closeAuthModal() {
+  document.getElementById('auth-modal').style.display = 'none';
+}
+function showRegisterForm() {
+  document.getElementById('auth-login-form').style.display = 'none';
+  document.getElementById('auth-register-form').style.display = 'block';
+}
+function showLoginForm() {
+  document.getElementById('auth-login-form').style.display = 'block';
+  document.getElementById('auth-register-form').style.display = 'none';
+}
+
+async function doLogin() {
+  const username = document.getElementById('login-username').value.trim();
+  const password = document.getElementById('login-password').value.trim();
+  if (!username || !password) { document.getElementById('auth-error').textContent = '请输入用户名和密码'; return; }
+
+  try {
+    const res = await authApi('POST', '/login', { username, password });
+    if (res.code === 200 && res.data) {
+      localStorage.setItem('auth_token', res.data.token);
+      localStorage.setItem('user_id', res.data.userId);
+      localStorage.setItem('username', res.data.username);
+      updateUserUI();
+      closeAuthModal();
+      loadConversations();
+      loadKnowledgeTree();
+    } else {
+      document.getElementById('auth-error').textContent = res.message || '登录失败';
+    }
+  } catch (e) {
+    document.getElementById('auth-error').textContent = '网络错误';
+  }
+}
+
+async function doRegister() {
+  const username = document.getElementById('reg-username').value.trim();
+  const password = document.getElementById('reg-password').value.trim();
+  const email = document.getElementById('reg-email').value.trim();
+  if (!username || !password) { document.getElementById('reg-error').textContent = '请输入用户名和密码'; return; }
+  if (password.length < 4) { document.getElementById('reg-error').textContent = '密码至少4位'; return; }
+
+  try {
+    const res = await authApi('POST', '/register', { username, password, email });
+    if (res.code === 200 && res.data) {
+      localStorage.setItem('auth_token', res.data.token);
+      localStorage.setItem('user_id', res.data.userId);
+      localStorage.setItem('username', res.data.username);
+      updateUserUI();
+      closeAuthModal();
+      // Show success and then log them in automatically
+      addGlobalMsg('system', '🎉 注册成功！已自动登录。');
+      loadConversations();
+      loadKnowledgeTree();
+    } else {
+      document.getElementById('reg-error').textContent = res.message || '注册失败';
+    }
+  } catch (e) {
+    document.getElementById('reg-error').textContent = '网络错误';
+  }
+}
+
+function doLogout() {
+  if (getToken()) {
+    authApi('POST', '/logout', {}).catch(() => {});
+  }
+  localStorage.removeItem('auth_token');
+  localStorage.removeItem('user_id');
+  localStorage.removeItem('username');
+  updateUserUI();
+  startNewConv();
+  addGlobalMsg('system', '已退出登录');
+}
+
+function updateUserUI() {
+  const loggedIn = isLoggedIn();
+  document.getElementById('auth-btn').style.display = loggedIn ? 'none' : 'inline-flex';
+  document.getElementById('logout-btn').style.display = loggedIn ? 'inline-flex' : 'none';
+  const userDisplay = document.getElementById('user-display');
+  if (loggedIn) {
+    userDisplay.textContent = '👤 ' + getUsername();
+    userDisplay.style.display = 'inline';
+  } else {
+    userDisplay.style.display = 'none';
+  }
+}
+
+// Initialize user UI on page load
+updateUserUI();
+
+// ====================== Learning Reports ======================
+var currentReportType = 'WEEKLY';
+
+function switchReportType(btn, type) {
+  currentReportType = type;
+  var btns = document.querySelectorAll('#report-content .tab-btn');
+  for (var i = 0; i < btns.length; i++) btns[i].classList.remove('active');
+  btn.classList.add('active');
+  loadReport();
+}
+
+async function loadReport() {
+  if (!isLoggedIn()) {
+    document.getElementById('report-content').innerHTML = '请先<a href="#" onclick="showAuthModal()" style="color:var(--primary);">登录</a>后查看学习报告';
+    document.getElementById('report-data').style.display = 'none';
+    return;
+  }
+  document.getElementById('report-content').innerHTML = '<div style="text-align:center;padding:40px;">加载报告中...</div>';
+  document.getElementById('report-data').style.display = 'none';
+  try {
+    var res = await authApi('GET', '/report?userId=' + getUserId() + '&type=' + currentReportType);
+    if (res.code === 200 && res.data) { renderReport(res.data); }
+    else { document.getElementById('report-content').innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted);">暂无学习数据</div>'; }
+  } catch (e) {
+    document.getElementById('report-content').innerHTML = '<div style="text-align:center;padding:40px;color:var(--danger);">加载失败</div>';
+  }
+}
+
+function renderReport(data) {
+  document.getElementById('report-data').style.display = 'block';
+  document.getElementById('report-summary-cards').innerHTML = ''
+    + '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;text-align:center;"><div style="font-size:24px;font-weight:700;color:var(--primary);">' + (data.totalQuestionsAnswered || 0) + '</div><div style="font-size:12px;color:var(--muted);margin-top:4px;">答题数</div></div>'
+    + '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;text-align:center;"><div style="font-size:24px;font-weight:700;color:var(--success);">' + (data.accuracy ? data.accuracy.toFixed(1) : 0) + '%</div><div style="font-size:12px;color:var(--muted);margin-top:4px;">正确率</div></div>'
+    + '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;text-align:center;"><div style="font-size:24px;font-weight:700;color:var(--warning);">' + (data.totalStudyMinutes || 0) + '</div><div style="font-size:12px;color:var(--muted);margin-top:4px;">学习分钟</div></div>'
+    + '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;text-align:center;"><div style="font-size:24px;font-weight:700;color:var(--purple);">' + (data.studyDays || 0) + '</div><div style="font-size:12px;color:var(--muted);margin-top:4px;">学习天数</div></div>';
+
+  var dailyEl = document.getElementById('report-daily-chart');
+  if (data.dailyStats && data.dailyStats.length > 0) {
+    var dh = '<div style="display:flex;gap:8px;align-items:end;min-height:150px;padding:10px 0;">';
+    var maxV = 1;
+    data.dailyStats.forEach(function(d) { maxV = Math.max(maxV, d.questionsAnswered || 0, d.studyMinutes || 0); });
+    data.dailyStats.forEach(function(d) {
+      var h = Math.max(((d.questionsAnswered || 0) / maxV) * 120, 4);
+      dh += '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;"><div style="width:100%;background:var(--primary);border-radius:4px 4px 0 0;height:' + h + 'px;min-height:4px;opacity:0.8;" title="\u7b54\u9898: ' + (d.questionsAnswered || 0) + '"></div><span style="font-size:10px;color:var(--muted);">' + (d.date ? d.date.substring(5) : '') + '</span></div>';
+    });
+    dh += '</div>';
+    dailyEl.innerHTML = dh;
+  } else { dailyEl.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted);">暂无每日学习数据</div>'; }
+
+  var catEl = document.getElementById('report-categories');
+  if (data.categoryBreakdown && data.categoryBreakdown.length > 0) {
+    var ch = '';
+    data.categoryBreakdown.forEach(function(c) {
+      var r = c.masteryRate || 0;
+      var cl = r >= 80 ? 'var(--success)' : r >= 50 ? 'var(--warning)' : 'var(--danger)';
+      ch += '<div style="margin-bottom:12px;"><div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;"><span>' + esc(String(c.category)) + '</span><span>' + (c.mastered||0) + '/' + (c.total||0) + ' (' + r.toFixed(0) + '%)</span></div><div style="height:8px;background:var(--bg);border-radius:4px;overflow:hidden;"><div style="height:100%;width:' + r + '%;background:' + cl + ';border-radius:4px;"></div></div></div>';
+    });
+    catEl.innerHTML = ch;
+  } else { catEl.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);">暂无分类数据</div>'; }
+
+  var weakEl = document.getElementById('report-weaknesses');
+  if (data.weakAreasList && data.weakAreasList.length > 0) {
+    var wh = '';
+    data.weakAreasList.forEach(function(w) {
+      var s = w.weaknessScore || 0;
+      wh += '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);"><span style="font-size:13px;">' + esc(String(w.category)) + '</span><span style="font-size:12px;color:' + (s > 60 ? 'var(--danger)' : 'var(--warning)') + ';">' + (w.notMastered||0) + '/' + (w.total||0) + ' 未掌握</span></div>';
+    });
+    weakEl.innerHTML = wh;
+  } else { weakEl.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);">暂无薄弱数据</div>'; }
+
+  var trendEl = document.getElementById('report-trend');
+  if (data.progressTrend && data.progressTrend.length > 0) {
+    var th = '<div style="display:flex;gap:8px;align-items:end;min-height:150px;padding:10px 0;">';
+    data.progressTrend.forEach(function(t) {
+      var a = t.accuracy || 0;
+      var h = Math.max(a * 1.2, 4);
+      var cl = a >= 80 ? 'var(--success)' : a >= 50 ? 'var(--warning)' : 'var(--danger)';
+      th += '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;"><div style="width:100%;background:' + cl + ';border-radius:4px 4px 0 0;height:' + h + 'px;min-height:4px;" title="\u6b63\u786e\u7387: ' + a.toFixed(0) + '%"></div><span style="font-size:10px;color:var(--muted);">' + (t.date ? t.date.substring(5) : '') + '</span></div>';
+    });
+    th += '</div>';
+    trendEl.innerHTML = th;
+  } else { trendEl.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted);">暂无趋势数据</div>'; }
+
+  var recEl = document.getElementById('report-recommendations');
+  if (data.recommendations && data.recommendations.length > 0) {
+    var rh = '<ul style="margin:0;padding-left:20px;line-height:2;">';
+    data.recommendations.forEach(function(r) { rh += '<li style="font-size:13px;">' + esc(r) + '</li>'; });
+    rh += '</ul>';
+    if (data.focusAreas && data.focusAreas.length > 0) {
+      rh += '<div style="margin-top:12px;"><strong style="font-size:13px;">重点提升方向：</strong><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">';
+      data.focusAreas.forEach(function(f) { rh += '<span style="padding:4px 12px;background:var(--primary-light);color:var(--primary);border-radius:12px;font-size:12px;">' + esc(f) + '</span>'; });
+      rh += '</div></div>';
+    }
+    recEl.innerHTML = rh;
+  } else { recEl.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);">暂无建议</div>'; }
+
+  document.getElementById('report-content').innerHTML = '';
+  document.getElementById('report-data').style.display = 'block';
+}
+
+async function exportCapabilityMap() {
+  if (!isLoggedIn()) { alert('请先登录'); showAuthModal(); return; }
+  try {
+    var resp = await fetch(AUTH_API + '/export?userId=' + getUserId(), { headers: getAuthHeaders() });
+    if (resp.ok) {
+      var blob = await resp.blob();
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'capability-map.json';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } else { alert('导出失败'); }
+  } catch (e) { alert('导出失败: ' + e.message); }
+}
+
+async function loadProfileAnalysis() {
+  if (!isLoggedIn()) { alert('请先登录'); showAuthModal(); return; }
+  var el = document.getElementById('report-profile-analysis');
+  el.style.display = 'block';
+  el.innerHTML = '<div style="text-align:center;padding:20px;">AI 分析中...</div>';
+  try {
+    var res = await authApi('GET', '/profile/analyze?userId=' + getUserId());
+    if (res.code === 200 && res.data) {
+      var d = res.data, h = '';
+      h += '<div style="margin-bottom:12px;"><strong>学习风格：</strong> ' + esc(d.learningStyle || '') + '</div>';
+      if (d.strengths && d.strengths.length > 0) {
+        h += '<div style="margin-bottom:8px;"><strong>优势：</strong></div><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;">';
+        d.strengths.forEach(function(s) { h += '<span style="padding:4px 12px;background:#d1fae5;color:#065f46;border-radius:12px;font-size:12px;">' + esc(s) + '</span>'; });
+        h += '</div>';
+      }
+      if (d.weaknesses && d.weaknesses.length > 0) {
+        h += '<div style="margin-bottom:8px;"><strong>待改进：</strong></div><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;">';
+        d.weaknesses.forEach(function(w) { h += '<span style="padding:4px 12px;background:#fee2e2;color:#991b1b;border-radius:12px;font-size:12px;">' + esc(w) + '</span>'; });
+        h += '</div>';
+      }
+      if (d.recommendedDirection) h += '<div style="margin-bottom:12px;"><strong>推荐方向：</strong> ' + esc(d.recommendedDirection) + '</div>';
+      if (d.shortTermGoals && d.shortTermGoals.length > 0) {
+        h += '<div style="margin-bottom:8px;"><strong>短期目标：</strong></div><ul style="margin:0 0 12px 0;padding-left:20px;">';
+        d.shortTermGoals.forEach(function(g) { h += '<li style="font-size:13px;">' + esc(g) + '</li>'; }); h += '</ul>';
+      }
+      if (d.longTermGoals && d.longTermGoals.length > 0) {
+        h += '<div style="margin-bottom:8px;"><strong>长期目标：</strong></div><ul style="margin:0 0 12px 0;padding-left:20px;">';
+        d.longTermGoals.forEach(function(g) { h += '<li style="font-size:13px;">' + esc(g) + '</li>'; }); h += '</ul>';
+      }
+      if (d.studyPlanAdvice) h += '<div style="background:var(--primary-light);padding:12px;border-radius:8px;font-size:13px;"><strong>学习计划：</strong> ' + esc(d.studyPlanAdvice) + '</div>';
+      el.innerHTML = h;
+    } else { el.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);">分析暂不可用</div>'; }
+  } catch (e) { el.innerHTML = '<div style="text-align:center;padding:20px;color:var(--danger);">分析失败</div>'; }
+}
+
+async function loadProfileQuestions() {
+  if (!isLoggedIn()) { alert('请先登录'); showAuthModal(); return; }
+  var el = document.getElementById('report-questions');
+  el.style.display = 'block';
+  el.innerHTML = '<div style="text-align:center;padding:20px;">生成题目中...</div>';
+  try {
+    var res = await authApi('GET', '/profile/questions?userId=' + getUserId());
+    if (res.code === 200 && res.data && res.data.length > 0) {
+      var h = '';
+      res.data.forEach(function(q, idx) {
+        h += '<div style="margin-bottom:16px;padding:12px;border:1px solid var(--border);border-radius:8px;">';
+        h += '<div style="font-size:13px;font-weight:600;margin-bottom:8px;">' + (idx+1) + '. ' + esc(q.question) + '</div>';
+        h += '<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;">';
+        if (q.options && q.options.length > 0) {
+          q.options.forEach(function(opt, oi) {
+            var letter = String.fromCharCode(65 + oi);
+            h += '<label style="font-size:13px;cursor:pointer;padding:6px 10px;border:1px solid var(--border);border-radius:6px;display:block;" onmouseover="this.style.background=\'var(--primary-light)\'" onmouseout="this.style.background=\'\'" onclick="checkAnswer(this,\'' + esc(q.correctAnswer) + '\',\'' + esc(q.explanation||'') + '\')">';
+            h += '<input type="radio" name="pq-' + idx + '" value="' + letter + '" style="margin-right:6px;">' + letter + '. ' + esc(opt);
+            h += '</label>';
+          });
+        }
+        h += '</div><div class="pq-result" style="font-size:12px;display:none;padding:8px;border-radius:4px;"></div>';
+        h += '<div style="font-size:11px;color:var(--muted);">相关知识点: ' + esc(q.relatedKnowledge||'') + '</div></div>';
+      });
+      el.innerHTML = h;
+    } else { el.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);">暂无法生成题目</div>'; }
+  } catch (e) { el.innerHTML = '<div style="text-align:center;padding:20px;color:var(--danger);">生成失败</div>'; }
+}
+
+function checkAnswer(label, correctAnswer, explanation) {
+  var parent = label.parentNode;
+  var inputs = parent.querySelectorAll('input[type="radio"]');
+  for (var i = 0; i < inputs.length; i++) inputs[i].disabled = true;
+  var selected = label.querySelector('input[type="radio"]');
+  if (selected) {
+    selected.checked = true;
+    if (selected.value === correctAnswer) { label.style.borderColor = 'var(--success)'; label.style.background = '#d1fae5'; }
+    else { label.style.borderColor = 'var(--danger)'; label.style.background = '#fee2e2'; }
+  }
+  var labels = parent.querySelectorAll('label');
+  for (var i = 0; i < labels.length; i++) {
+    var inp = labels[i].querySelector('input[type="radio"]');
+    if (inp && inp.value === correctAnswer) { labels[i].style.borderColor = 'var(--success)'; labels[i].style.background = '#d1fae5'; }
+  }
+  var resultDiv = parent.parentNode.querySelector('.pq-result');
+  if (resultDiv) {
+    resultDiv.style.display = 'block';
+    var selectedVal = selected ? selected.value : '';
+    if (selectedVal === correctAnswer) {
+      resultDiv.style.background = '#d1fae5'; resultDiv.style.color = '#065f46';
+      resultDiv.textContent = '正确!' + (explanation ? ' ' + explanation : '');
+    } else {
+      resultDiv.style.background = '#fee2e2'; resultDiv.style.color = '#991b1b';
+      resultDiv.textContent = '错误，正确答案是 ' + correctAnswer + '。' + (explanation ? ' ' + explanation : '');
+    }
+  }
+}
+
+async function loadNotificationConfig() {
+  if (!isLoggedIn()) { alert('请先登录'); showAuthModal(); return; }
+  var el = document.getElementById('report-notifications');
+  el.style.display = 'block';
+  el.innerHTML = '<div style="text-align:center;padding:20px;">加载中...</div>';
+  try {
+    var res = await authApi('GET', '/notification/config?userId=' + getUserId());
+    if (res.code === 200 && res.data) {
+      var c = res.data;
+      el.innerHTML = '<div style="display:flex;flex-direction:column;gap:12px;">'
+        + '<div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-size:13px;">邮件通知</span>'
+        + '<label style="position:relative;display:inline-block;width:44px;height:24px;"><input type="checkbox" onchange="saveNotificationConfig()" ' + (c.emailNotifications ? 'checked' : '') + ' id="notif-email" style="opacity:0;width:0;height:0;">'
+        + '<span style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:' + (c.emailNotifications ? 'var(--primary)' : '#ccc') + ';border-radius:12px;"></span></label></div>'
+        + '<div style="display:flex;align-items:center;gap:8px;"><span style="font-size:13px;min-width:80px;">邮箱地址</span>'
+        + '<input type="email" id="notif-email-addr" value="' + esc(c.emailAddress || '') + '" placeholder="your@email.com" onchange="saveNotificationConfig()" style="flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;"></div>'
+        + '<div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-size:13px;">复习提醒</span>'
+        + '<label style="position:relative;display:inline-block;width:44px;height:24px;"><input type="checkbox" onchange="saveNotificationConfig()" ' + (c.reviewReminder ? 'checked' : '') + ' id="notif-review" style="opacity:0;width:0;height:0;">'
+        + '<span style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:' + (c.reviewReminder ? 'var(--primary)' : '#ccc') + ';border-radius:12px;"></span></label></div>'
+        + '<div id="notif-status" style="font-size:11px;color:var(--muted);text-align:right;"></div></div>';
+    }
+  } catch (e) { el.innerHTML = '<div style="text-align:center;padding:20px;color:var(--danger);">加载失败</div>'; }
+}
+
+async function saveNotificationConfig() {
+  var st = document.getElementById('notif-status');
+  if (st) st.textContent = '保存中...';
+  try {
+    await authApi('PUT', '/notification/config', {
+      userId: getUserId(),
+      emailNotifications: document.getElementById('notif-email') ? document.getElementById('notif-email').checked : false,
+      emailAddress: document.getElementById('notif-email-addr') ? document.getElementById('notif-email-addr').value : '',
+      reviewReminder: document.getElementById('notif-review') ? document.getElementById('notif-review').checked : true
+    });
+    if (st) st.textContent = '已保存';
+  } catch (e) { if (st) st.textContent = '保存失败'; }
+  if (st) setTimeout(function() { st.textContent = ''; }, 2000);
+}
+
+// Override switchTab
+window.switchTab = function(tab) {
+  var tabs = document.querySelectorAll('.nav-tab');
+  for (var i = 0; i < tabs.length; i++) tabs[i].classList.toggle('active', tabs[i].dataset.tab === tab);
+  var contents = document.querySelectorAll('.tab-content');
+  for (var i = 0; i < contents.length; i++) contents[i].classList.toggle('active', contents[i].id === 'tab-' + tab);
+  if (tab === 'questions') loadQuestions();
+  if (tab === 'cards') loadCards();
+  if (tab === 'progress') loadProgress();
+  if (tab === 'reports') loadReport();
+  if (tab === 'practice' && editor) setTimeout(function() { editor.layout(); }, 100);
+};
+
 // ====================== Config ======================
+const VENDOR_PRESETS = {
+  deepseek: { baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat' },
+  openai: { baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o' },
+  siliconflow: { baseUrl: 'https://api.siliconflow.cn/v1', model: 'deepseek-ai/DeepSeek-V2.5' },
+  ollama: { baseUrl: 'http://localhost:11434/v1', model: 'llama3' },
+  custom: { baseUrl: '', model: '' }
+};
+
+function onVendorChange() {
+  const vendor = document.getElementById('cfg-vendor').value;
+  const preset = VENDOR_PRESETS[vendor] || VENDOR_PRESETS.custom;
+  const baseUrlInput = document.getElementById('cfg-baseurl');
+  const modelInput = document.getElementById('cfg-model');
+  const apikeyInput = document.getElementById('cfg-apikey');
+  if (vendor !== 'custom') {
+    baseUrlInput.value = preset.baseUrl;
+    modelInput.value = preset.model;
+  }
+  if (vendor === 'ollama') {
+    apikeyInput.value = 'ollama';
+  }
+  saveConfig();
+}
+
 function toggleConfig() {
   const panel = document.getElementById('config-panel');
   panel.classList.toggle('open');
@@ -536,8 +1241,20 @@ async function loadConfig() {
     const res = await api('GET', '/assistant/config');
     if (res.code === 200 && res.data) {
       const c = res.data;
-      document.getElementById('cfg-apikey').value = c.deepseek_api_key || '';
-      document.getElementById('cfg-model').value = c.model || 'deepseek-chat';
+      document.getElementById('cfg-apikey').value = c.api_key || '';
+      const baseUrl = c.base_url || 'https://api.deepseek.com';
+      const model = c.model || 'deepseek-chat';
+      document.getElementById('cfg-baseurl').value = baseUrl;
+      document.getElementById('cfg-model').value = model;
+      // Determine vendor from base_url
+      let vendor = 'custom';
+      for (const [key, preset] of Object.entries(VENDOR_PRESETS)) {
+        if (key !== 'custom' && baseUrl === preset.baseUrl && model === preset.model) {
+          vendor = key;
+          break;
+        }
+      }
+      document.getElementById('cfg-vendor').value = vendor;
       document.getElementById('cfg-temp').value = c.temperature || '0.7';
       document.getElementById('cfg-temp-val').textContent = c.temperature || '0.7';
       document.getElementById('cfg-tokens').value = c.max_tokens || '2048';
@@ -554,7 +1271,8 @@ async function saveConfig() {
   try {
     const tempInput = document.getElementById('cfg-temp');
     const res = await api('PUT', '/assistant/config', {
-      deepseek_api_key: document.getElementById('cfg-apikey').value,
+      api_key: document.getElementById('cfg-apikey').value,
+      base_url: document.getElementById('cfg-baseurl').value,
       model: document.getElementById('cfg-model').value,
       temperature: tempInput.value,
       max_tokens: document.getElementById('cfg-tokens').value,
@@ -563,13 +1281,13 @@ async function saveConfig() {
       system_prompt: document.getElementById('cfg-prompt').value
     });
     if (res.code === 200) {
-      status.textContent = '✅ 已保存';
+      status.textContent = '已保存';
       document.getElementById('cfg-temp-val').textContent = tempInput.value;
     } else {
-      status.textContent = '❌ 保存失败';
+      status.textContent = '保存失败';
     }
   } catch (e) {
-    status.textContent = '❌ 网络错误';
+    status.textContent = '网络错误';
   }
   setTimeout(() => { status.textContent = ''; }, 2000);
 }
@@ -577,7 +1295,7 @@ async function saveConfig() {
 // ====================== Conversations ======================
 async function loadConversations() {
   try {
-    const res = await api('GET', '/assistant/conversations?userId=' + USER_ID);
+    const res = await api('GET', '/assistant/conversations?userId=' + getUserId());
     if (res.code !== 200) return;
     const list = res.data || [];
     const sel = document.getElementById('conv-selector');
@@ -641,7 +1359,7 @@ async function loadKnowledgeTree() {
   try {
     const [treeRes, masterRes] = await Promise.all([
       api('GET', '/knowledge-tree'),
-      api('GET', '/knowledge-tree/mastered?userId=' + USER_ID)
+      api('GET', '/knowledge-tree/mastered?userId=' + getUserId())
     ]);
     if (masterRes.code === 200) treeMasteredNodes = new Set(masterRes.data || []);
     if (treeRes.code === 200 && treeRes.data) {
@@ -767,6 +1485,17 @@ async function selectTreeNode(node) {
     }
   }
 
+  // Check if this is a Spring Boot project node
+  if (node.type === 'project') {
+    await loadSpringProject(node);
+    return;
+  }
+
+  // Reset project UI if coming from project mode
+  if (isProjectMode) {
+    exitProjectMode();
+  }
+
   document.getElementById('scenario-info').textContent = `⏳ ${node.name} - AI 生成代码中...`;
   document.getElementById('terminal-output').innerHTML = `<span style="color:#94a3b8;">🤖 AI 正在为"${esc(node.name)}"生成代码...</span>`;
   setStatus('生成中...');
@@ -794,7 +1523,6 @@ async function selectTreeNode(node) {
       document.getElementById('terminal-output').innerHTML = `<span class="err">${errMsg}</span>`;
       document.getElementById('scenario-info').textContent = '❌ 生成失败';
       setStatus('错误');
-      // If the error is about API key, add a message in chat
       if (errMsg.includes('API Key')) {
         addGlobalMsg('system', '⚠️ 需要配置 API Key 才能生成代码。请点击右上角 ⚙️ 打开设置面板，在 API Key 输入框中填入你的 DeepSeek API Key，然后重新点击知识点。');
       }
@@ -804,6 +1532,113 @@ async function selectTreeNode(node) {
     document.getElementById('scenario-info').textContent = '❌ 网络错误';
     setStatus('错误');
   }
+}
+
+async function loadSpringProject(node) {
+  isProjectMode = true;
+  currentScenario = null;
+  originalCode = '';
+  document.getElementById('scenario-info').textContent = `🍃 ${node.name} - 加载 Spring Boot 项目中...`;
+  document.getElementById('terminal-output').innerHTML = '<span style="color:#94a3b8;">📦 初始化 Spring Boot Maven 项目...</span>';
+  setStatus('加载中...');
+
+  try {
+    const res = await api('POST', '/knowledge-tree/project', { nodeId: node.id });
+    if (res.code === 200 && res.data) {
+      const project = res.data;
+      currentProjectFiles = project.files;
+      currentProjectDir = project.baseDir || '';
+      currentKnowledgePoint = project.description;
+
+      // Render file tabs
+      renderProjectFileTabs(project.files);
+
+      // Switch to first file
+      if (project.files.length > 0) {
+        switchProjectFile(project.files[0].path);
+      }
+
+      document.getElementById('scenario-info').textContent = `🍃 ${node.name} — ${project.files.length} 个文件`;
+      document.getElementById('terminal-output').innerHTML = '<span style="color:#94a3b8;">✅ Spring Boot 项目已生成，点击文件名切换，点"编译项目"用 Maven 构建。</span>';
+      document.getElementById('project-controls').style.display = 'block';
+      document.getElementById('project-controls').innerHTML = `<span>🍃 Spring Boot Maven 项目</span>`;
+      document.getElementById('run-btn').textContent = '🔨 编译项目';
+      setStatus('就绪');
+    } else {
+      const errMsg = esc(res.message || '生成失败');
+      document.getElementById('terminal-output').innerHTML = `<span class="err">${errMsg}</span>`;
+      document.getElementById('scenario-info').textContent = '❌ 项目生成失败';
+      setStatus('错误');
+    }
+  } catch (e) {
+    document.getElementById('terminal-output').innerHTML = `<span class="err">请求失败: ${e.message}</span>`;
+    document.getElementById('scenario-info').textContent = '❌ 网络错误';
+    setStatus('错误');
+  }
+}
+
+function renderProjectFileTabs(files) {
+  const container = document.getElementById('project-file-tabs');
+  container.innerHTML = '';
+  container.style.display = 'block';
+  container.style.background = '#f1f5f9';
+
+  files.forEach(f => {
+    const tab = document.createElement('span');
+    tab.className = 'project-file-tab';
+    tab.dataset.path = f.path;
+    tab.textContent = f.path.split('/').pop();
+    tab.title = f.path;
+    tab.style.cssText = 'display:inline-block;padding:4px 12px;font-size:12px;cursor:pointer;border-radius:4px 4px 0 0;margin-right:2px;background:#e2e8f0;color:#475569;transition:all 0.1s;';
+    tab.onmouseenter = function() { if (!tab.classList.contains('active')) tab.style.background = '#cbd5e1'; };
+    tab.onmouseleave = function() { if (!tab.classList.contains('active')) tab.style.background = '#e2e8f0'; };
+    tab.onclick = () => switchProjectFile(f.path);
+    container.appendChild(tab);
+  });
+
+  // Activate first tab
+  const first = container.querySelector('.project-file-tab');
+  if (first) {
+    first.style.background = '#ffffff';
+    first.style.color = '#1e293b';
+    first.style.fontWeight = '600';
+    first.classList.add('active');
+  }
+}
+
+function switchProjectFile(filePath) {
+  if (!currentProjectFiles) return;
+  const file = currentProjectFiles.find(f => f.path === filePath);
+  if (!file) return;
+
+  currentFilePath = filePath;
+  if (editor) editor.setValue(file.content);
+  // Update language based on file extension
+  const ext = filePath.split('.').pop();
+  const langMap = { 'java': 'java', 'xml': 'xml', 'properties': 'ini', 'yml': 'yaml', 'yaml': 'yaml' };
+  const lang = langMap[ext] || 'plaintext';
+  monaco.editor.setModelLanguage(editor.getModel(), lang);
+
+  // Update tab styles
+  document.querySelectorAll('.project-file-tab').forEach(tab => {
+    const isActive = tab.dataset.path === filePath;
+    tab.style.background = isActive ? '#ffffff' : '#e2e8f0';
+    tab.style.color = isActive ? '#1e293b' : '#475569';
+    tab.style.fontWeight = isActive ? '600' : '400';
+    tab.classList.toggle('active', isActive);
+  });
+}
+
+function exitProjectMode() {
+  isProjectMode = false;
+  currentProjectFiles = null;
+  currentProjectDir = '';
+  currentFilePath = '';
+  document.getElementById('project-file-tabs').style.display = 'none';
+  document.getElementById('project-file-tabs').innerHTML = '';
+  document.getElementById('project-controls').style.display = 'none';
+  document.getElementById('project-controls').innerHTML = '';
+  document.getElementById('run-btn').textContent = '▶ 运行代码';
 }
 
 function toggleTreePanel() {
@@ -820,7 +1655,7 @@ async function toggleTreeNodeMaster(nodeId) {
     const res = await api('POST', '/knowledge-tree/master', {
       nodeId: nodeId,
       mastered: String(!isMastered),
-      userId: USER_ID
+      userId: getUserId()
     });
     if (res.code === 200) {
       if (isMastered) treeMasteredNodes.delete(nodeId);
@@ -854,7 +1689,7 @@ async function triggerCodeAnalysis(originalCode, modifiedCode) {
         \`\`\`java
         ${modifiedCode}
         \`\`\``,
-      userId: USER_ID
+      userId: getUserId()
     });
 
     if (res.code === 200 && res.data) {
@@ -906,6 +1741,10 @@ function filterNodes(nodes, keyword) {
 function loadScenarios() {} // no-op, kept for compatibility
 
 async function runCode() {
+  if (isProjectMode && currentProjectFiles) {
+    await buildProject();
+    return;
+  }
   if (!editor) return;
   const code = editor.getValue();
   if (!code.trim()) return;
@@ -927,7 +1766,53 @@ async function runCode() {
   }
 }
 
+async function buildProject() {
+  if (!currentProjectFiles) return;
+  setStatus('编译中...');
+  document.getElementById('terminal-output').innerHTML = '<span style="color:#94a3b8;">📦 Maven 编译中（下载依赖可能需要较长时间）...</span>';
+
+  // Collect latest code from editor for the current file
+  if (editor && currentFilePath) {
+    const idx = currentProjectFiles.findIndex(f => f.path === currentFilePath);
+    if (idx >= 0) {
+      currentProjectFiles[idx].content = editor.getValue();
+    }
+  }
+
+  try {
+    const cleanFiles = currentProjectFiles.map(f => ({ path: f.path, content: f.content }));
+    const res = await api('POST', '/project/build', {
+      projectDir: currentProjectDir,
+      files: cleanFiles
+    });
+    const r = res.data || {};
+    let html = '';
+    if (r.output) {
+      html += `<span style="color:#94a3b8;">${esc(r.output)}</span>`;
+    }
+    if (r.success) {
+      html = `<span class="ok">✅ 编译成功 (${r.elapsedMs || 0}ms)</span>\n` + html;
+    } else {
+      html = `<span class="err">❌ 编译失败 (退出码: ${r.exitCode || -1})</span>\n` + html;
+    }
+    document.getElementById('terminal-output').innerHTML = html;
+    setStatus(r.success ? '编译成功' : '编译失败');
+  } catch (e) {
+    document.getElementById('terminal-output').innerHTML = `<span class="err">构建请求失败: ${e.message}</span>`;
+    setStatus('错误');
+  }
+}
+
 function resetCode() {
+  if (isProjectMode && currentProjectFiles && currentFilePath) {
+    // Reset current file to original content
+    const file = currentProjectFiles.find(f => f.path === currentFilePath);
+    if (file && editor) {
+      editor.setValue(file.content);
+      document.getElementById('terminal-output').innerHTML = '<span style="color:#94a3b8;">文件已重置</span>';
+    }
+    return;
+  }
   if (originalCode && editor) { editor.setValue(originalCode);
     document.getElementById('terminal-output').innerHTML = '<span style="color:#94a3b8;">代码已重置</span>'; }
 }
@@ -949,7 +1834,7 @@ async function deleteQuestionConfirm(id) {
 // ====================== Questions Tab ======================
 async function loadQuestions() {
   try {
-    const res = await api('GET', '/questions?userId=' + USER_ID);
+    const res = await api('GET', '/questions?userId=' + getUserId());
     if (res.code === 200) {
       questionsList = res.data || [];
       renderQuestionList(questionsList);
@@ -1005,7 +1890,7 @@ async function selectQuestion(id) {
   selectedQuestionId = id;
   renderQuestionList(questionsList);
   try {
-    const res = await api('GET', '/questions/' + id + '?userId=' + USER_ID);
+    const res = await api('GET', '/questions/' + id + '?userId=' + getUserId());
     if (res.code !== 200 || !res.data) return;
     const q = res.data;
     // Load card and discussions
@@ -1036,7 +1921,7 @@ async function selectQuestion(id) {
 
         <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
           <button class="btn btn-outline btn-sm" onclick="loadToEditor(\`${esc(q.trapCode || '')}\`, '${esc(q.title)}')">🎯 在练习中打开</button>
-          <button class="btn btn-outline btn-sm" onclick="generateCard(${q.id})">📇 生成知识卡片</button>
+          <button class="btn btn-outline btn-sm" onclick="viewCard(${q.id})">📇 查看知识卡片</button>
         </div>
 
         ${q.trapCode ? `<div style="margin-bottom:12px;"><div style="font-size:12px;font-weight:600;margin-bottom:4px;">📄 陷阱代码</div><pre style="background:#1e293b;color:#e2e8f0;padding:10px;border-radius:8px;font-size:12px;overflow-x:auto;max-height:300px;">${esc(q.trapCode)}</pre></div>` : ''}
@@ -1094,25 +1979,44 @@ function renderFullCardHtml(card) {
   const points = card.keyPoints ? card.keyPoints.split('|').map(p => p.trim()).filter(Boolean) : [];
   const pitfalls = card.commonPitfalls ? card.commonPitfalls.split('|').map(p => p.trim()).filter(Boolean) : [];
   const editing = sessionStorage.getItem('editing-card') === String(card.id);
+  const expanded = sessionStorage.getItem('expanded-card') === String(card.id);
   if (editing) return renderEditCardHtml(card);
 
-  return `<div class="mini-card" style="background:linear-gradient(135deg,#eff6ff,#faf5ff);border:1px solid #c7d2fe;border-radius:10px;padding:12px;position:relative;">
-    <div style="display:flex;align-items:start;justify-content:space-between;margin-bottom:6px;">
-      <div style="display:flex;align-items:center;gap:6px;min-width:0;flex:1;">
-        <span style="font-size:16px;">📇</span>
+  const detailContent = `
+    ${card.detailExplanation ? `<p style="margin:0 0 8px;font-size:14px;color:var(--text);line-height:1.6;">${esc(card.detailExplanation)}</p>` : ''}
+    ${points.length > 0 ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;">${points.map(p => `<span style="background:var(--primary);color:white;padding:4px 12px;border-radius:12px;font-size:13px;">${esc(p)}</span>`).join('')}</div>` : ''}
+    ${pitfalls.length > 0 ? `<div style="font-size:13px;color:var(--danger);line-height:1.6;">${pitfalls.map(p => `⚠ ${esc(p)}`).join('<br>')}</div>` : ''}
+  `;
+
+  const isSelected = selectedCardId === card.id;
+  const cardStyle = isSelected
+    ? 'background:linear-gradient(135deg,#dbeafe,#e0e7ff);border:2px solid var(--primary);border-radius:10px;padding:14px 16px;position:relative;cursor:pointer;box-shadow:0 0 0 3px rgba(37,99,235,0.15);'
+    : 'background:linear-gradient(135deg,#eff6ff,#faf5ff);border:1px solid #c7d2fe;border-radius:10px;padding:14px 16px;position:relative;cursor:pointer;';
+  if (isSelected) {
+    setTimeout(() => {
+      const el = document.getElementById('card-' + card.id);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 200);
+    // Clear selection after 3 seconds
+    setTimeout(() => { selectedCardId = null; }, 3000);
+  }
+  return `<div class="mini-card" id="card-${card.id}" style="${cardStyle}" onclick="toggleCardExpand(${card.id})">
+    <div style="display:flex;align-items:start;justify-content:space-between;margin-bottom:4px;">
+      <div style="display:flex;align-items:center;gap:8px;min-width:0;flex:1;">
+        <span style="font-size:18px;">📇</span>
         <div style="min-width:0;flex:1;">
-          <div style="font-size:13px;font-weight:600;color:var(--purple);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;" onclick="loadCardToPractice(${card.questionId},'${esc(card.title)}')" title="点击在练习中打开">${esc(card.title)}</div>
-          <div style="font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${card.questionTitle ? esc(card.questionTitle) : '#'+card.questionId}</div>
+          <div style="font-size:15px;font-weight:600;color:var(--purple);">${esc(card.title)}</div>
+          <div style="font-size:12px;color:var(--muted);">${card.questionTitle ? esc(card.questionTitle) : '#'+card.questionId}</div>
         </div>
       </div>
-      <div style="display:flex;gap:2px;flex-shrink:0;">
-        <button onclick="event.stopPropagation();startCardEdit(${card.id})" style="background:none;border:none;cursor:pointer;font-size:13px;color:var(--muted);padding:2px 4px;border-radius:4px;" title="编辑">✏️</button>
-        <button onclick="event.stopPropagation();deleteCardConfirm(${card.id})" style="background:none;border:none;cursor:pointer;font-size:13px;color:var(--danger);padding:2px 4px;border-radius:4px;" title="删除">🗑️</button>
+      <div style="display:flex;gap:4px;flex-shrink:0;align-items:center;">
+        <span style="font-size:12px;color:var(--muted);margin-right:4px;">${expanded ? '收起' : '展开'}</span>
+        <button onclick="event.stopPropagation();loadCardToPractice(${card.questionId},'${esc(card.title)}')" style="background:var(--primary);color:white;border:none;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;" title="练习">🎯 练习</button>
+        <button onclick="event.stopPropagation();startCardEdit(${card.id})" style="background:none;border:none;cursor:pointer;font-size:14px;color:var(--muted);padding:4px;" title="编辑">✏️</button>
+        <button onclick="event.stopPropagation();deleteCardConfirm(${card.id})" style="background:none;border:none;cursor:pointer;font-size:14px;color:var(--danger);padding:4px;" title="删除">🗑️</button>
       </div>
     </div>
-    ${card.detailExplanation ? `<p style="margin:0 0 6px;font-size:11px;color:var(--text);line-height:1.4;">${esc(card.detailExplanation)}</p>` : ''}
-    ${points.length > 0 ? `<div style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:6px;">${points.map(p => `<span style="background:var(--primary);color:white;padding:2px 8px;border-radius:10px;font-size:10px;">${esc(p)}</span>`).join('')}</div>` : ''}
-    ${pitfalls.length > 0 ? `<div style="font-size:10px;color:var(--danger);line-height:1.4;">${pitfalls.map(p => `⚠ ${esc(p)}`).join(' | ')}</div>` : ''}
+    ${expanded ? detailContent : `<div style="font-size:14px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${card.detailExplanation ? esc(card.detailExplanation) : ''}</div>`}
   </div>`;
 }
 
@@ -1144,6 +2048,13 @@ function renderEditCardHtml(card) {
       <button onclick="saveCardEdit(${card.id})" class="btn btn-sm btn-primary">保存</button>
     </div>
   </div>`;
+}
+
+function toggleCardExpand(id) {
+  const prev = sessionStorage.getItem('expanded-card');
+  if (prev === String(id)) sessionStorage.removeItem('expanded-card');
+  else sessionStorage.setItem('expanded-card', String(id));
+  loadCards();
 }
 
 function loadCardToPractice(qId, title) {
@@ -1218,6 +2129,25 @@ async function loadCards() {
   } catch (e) { console.error(e); }
 }
 
+async function viewCard(qId) {
+  try {
+    const res = await api('GET', '/questions/' + qId + '/card');
+    if (res.code !== 200 || !res.data) {
+      // No card exists, generate one
+      const genRes = await api('POST', `/questions/${qId}/card/generate`);
+      if (genRes.code === 200 && genRes.data) {
+        const area = document.getElementById('card-area-' + qId);
+        if (area) area.outerHTML = renderCardHtml(genRes.data, qId);
+        selectedCardId = genRes.data.id;
+      } else { return; }
+    } else {
+      selectedCardId = res.data.id;
+    }
+  } catch (e) { console.error(e); return; }
+  switchTab('cards');
+  loadCards();
+}
+
 async function generateCard(qId) {
   try {
     const res = await api('POST', `/questions/${qId}/card/generate`);
@@ -1240,7 +2170,7 @@ async function addDiscussion(qId) {
   const content = input.value.trim();
   if (!content) return;
   try {
-    const res = await api('POST', `/questions/${qId}/discussions`, { content, userId: USER_ID });
+    const res = await api('POST', `/questions/${qId}/discussions`, { content, userId: getUserId() });
     if (res.code === 200) {
       input.value = '';
       selectQuestion(qId);
@@ -1250,7 +2180,7 @@ async function addDiscussion(qId) {
 
 async function toggleMastered(qId, mastered) {
   try {
-    const res = await api('POST', `/questions/${qId}/mastered`, { userId: USER_ID, mastered });
+    const res = await api('POST', `/questions/${qId}/mastered`, { userId: getUserId(), mastered });
     if (res.code === 200) {
       selectQuestion(qId);
       loadQuestions();
@@ -1345,8 +2275,8 @@ async function importQuestion() {
 async function loadProgress() {
   try {
     const [qRes, dueRes] = await Promise.all([
-      api('GET', '/questions?userId=' + USER_ID),
-      api('GET', '/questions/review/due?userId=' + USER_ID)
+      api('GET', '/questions?userId=' + getUserId()),
+      api('GET', '/questions/review/due?userId=' + getUserId())
     ]);
     const all = (qRes.code === 200 ? qRes.data : []) || [];
     const due = (dueRes.code === 200 ? dueRes.data : []) || [];
@@ -1385,8 +2315,8 @@ function switchReviewTab(el, tab) {
 async function loadAndRenderReview(tab) {
   try {
     const [qRes, dueRes] = await Promise.all([
-      api('GET', '/questions?userId=' + USER_ID),
-      api('GET', '/questions/review/due?userId=' + USER_ID)
+      api('GET', '/questions?userId=' + getUserId()),
+      api('GET', '/questions/review/due?userId=' + getUserId())
     ]);
     const all = (qRes.code === 200 ? qRes.data : []) || [];
     const due = (dueRes.code === 200 ? dueRes.data : []) || [];
@@ -1436,14 +2366,14 @@ function renderReviewList(tab, dueList, masteredList, allList) {
 
 async function updateReview(qId, stillMastered) {
   try {
-    await api('POST', '/questions/review', { questionId: qId, userId: USER_ID, stillMastered });
+    await api('POST', '/questions/review', { questionId: qId, userId: getUserId(), stillMastered });
     loadAndRenderReview(reviewTab);
   } catch (e) { console.error(e); }
 }
 
 async function toggleMasteredSimple(qId, mastered) {
   try {
-    await api('POST', `/questions/${qId}/mastered`, { userId: USER_ID, mastered });
+    await api('POST', `/questions/${qId}/mastered`, { userId: getUserId(), mastered });
     loadAndRenderReview(reviewTab);
   } catch (e) { console.error(e); }
 }
@@ -1453,8 +2383,399 @@ function selectQuestionAndGo(qId) {
   setTimeout(() => selectQuestion(qId), 200);
 }
 
+// ====================== Community Tab ======================
+let communityFilterVersion = 'all';
+let communityFilterCategory = 'all';
+let communityFilterStatus = 'all';
+let communityTraps = [];
+let selectedCommunityId = null;
+
+function filterCommunityVersion(el) {
+  document.querySelectorAll('#tab-community [data-ver]').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  communityFilterVersion = el.dataset.ver;
+  loadCommunityTraps();
+}
+
+function filterCommunityCategory(el) {
+  document.querySelectorAll('#tab-community [data-cat]').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  communityFilterCategory = el.dataset.cat;
+  loadCommunityTraps();
+}
+
+function filterCommunityStatus(el) {
+  document.querySelectorAll('#tab-community [data-sta]').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  communityFilterStatus = el.dataset.sta;
+  loadCommunityTraps();
+}
+
+async function loadCommunityTraps() {
+  try {
+    const params = new URLSearchParams({
+      javaVersion: communityFilterVersion,
+      category: communityFilterCategory,
+      status: communityFilterStatus
+    });
+    const res = await api('GET', '/community/traps?' + params.toString());
+    if (res.code === 200 && res.data) {
+      communityTraps = res.data;
+      renderCommunityList(communityTraps);
+      document.getElementById('community-count').textContent = communityTraps.length + ' 个陷阱';
+    }
+  } catch (e) { console.error(e); }
+}
+
+function renderCommunityList(list) {
+  const el = document.getElementById('community-list');
+  if (!list || list.length === 0) {
+    el.innerHTML = '<div style="padding:30px;text-align:center;color:var(--muted);font-size:13px;">暂无社区陷阱<br><span style="font-size:12px;">点击上方「提交陷阱」贡献你的代码</span></div>';
+    return;
+  }
+  el.innerHTML = list.map(t => {
+    const statusColor = t.status === 'APPROVED' ? '#22c55e' : t.status === 'REJECTED' ? '#ef4444' : '#f59e0b';
+    const statusText = t.status === 'APPROVED' ? '已通过' : t.status === 'REJECTED' ? '已拒绝' : '待审核';
+    return `
+      <div class="question-card ${selectedCommunityId === t.id ? 'selected' : ''}" style="margin:6px 10px;" onclick="selectCommunityTrap(${t.id})">
+        <div style="display:flex;align-items:start;gap:8px;">
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(t.title)}</div>
+            <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;">
+              <span style="font-size:10px;padding:1px 6px;border-radius:4px;background:#dbeafe;color:var(--primary);">Java ${t.javaVersion}</span>
+              <span style="font-size:10px;padding:1px 6px;border-radius:4px;background:#f3e8ff;color:#7c3aed;">${t.category}</span>
+              <span style="font-size:10px;padding:1px 6px;border-radius:4px;background:#fef3c7;color:#92400e;">${t.difficulty ? '⭐'.repeat(Math.min(t.difficulty,5)) : '⭐'}</span>
+              <span style="font-size:10px;padding:1px 6px;border-radius:4px;background:${statusColor}22;color:${statusColor};">${statusText}</span>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:3px;font-size:11px;color:var(--muted);">
+              <span>👍 ${t.voteCount || 0}</span>
+              <span>👤 ${esc(t.submitter)}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function selectCommunityTrap(id) {
+  selectedCommunityId = id;
+  renderCommunityList(communityTraps);
+  try {
+    const res = await api('GET', '/community/traps/' + id);
+    if (res.code !== 200 || !res.data) return;
+    const t = res.data;
+
+    const statusColor = t.status === 'APPROVED' ? '#22c55e' : t.status === 'REJECTED' ? '#ef4444' : '#f59e0b';
+    const statusText = t.status === 'APPROVED' ? '已通过' : t.status === 'REJECTED' ? '已拒绝' : '待审核';
+
+    let hintsHtml = '';
+    if (t.hints) {
+      try { if (Array.isArray(t.hints)) hintsHtml = t.hints.map((h,i) => '<li style="margin-bottom:4px;">💡 ' + esc(h) + '</li>').join(''); } catch(e) {}
+    }
+
+    document.getElementById('community-detail').innerHTML = `
+      <div style="max-width:800px;">
+        <div style="display:flex;align-items:start;justify-content:space-between;margin-bottom:12px;">
+          <div>
+            <h2 style="margin:0;font-size:18px;">${esc(t.title)}</h2>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
+              <span style="font-size:11px;padding:2px 8px;border-radius:4px;background:#dbeafe;color:var(--primary);">Java ${t.javaVersion}</span>
+              <span style="font-size:11px;padding:2px 8px;border-radius:4px;background:#f3e8ff;color:#7c3aed;">${t.category}</span>
+              <span style="font-size:11px;padding:2px 8px;border-radius:4px;background:#fef3c7;color:#92400e;">${t.difficulty ? '⭐'.repeat(Math.min(t.difficulty,5)) : '⭐'}</span>
+              <span style="font-size:11px;padding:2px 8px;border-radius:4px;background:${statusColor}22;color:${statusColor};">${statusText}</span>
+            </div>
+            <div style="font-size:12px;color:var(--muted);margin-top:4px;">${t.knowledgePoint || ''} · 贡献者: ${esc(t.submitter)}</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:start;flex-wrap:wrap;">
+            <button class="btn btn-sm btn-outline" onclick="voteCommunityTrap(${t.id})">👍 投票 (${t.voteCount || 0})</button>
+            <button class="btn btn-sm btn-success" onclick="loadCommunityToEditor(${t.id})">🎯 练习</button>
+            ${t.status === 'APPROVED' ? '<button class="btn btn-sm btn-primary" onclick="integrateCommunityTrap(' + t.id + ')">📚 导入题库</button>' : ''}
+          </div>
+        </div>
+
+        ${t.trapCode ? '<div style="margin-bottom:12px;"><div style="font-size:12px;font-weight:600;margin-bottom:4px;">陷阱代码</div><pre style="background:#1e293b;color:#e2e8f0;padding:10px;border-radius:8px;font-size:12px;overflow-x:auto;max-height:350px;">' + esc(t.trapCode) + '</pre></div>' : ''}
+
+        ${t.expectedPitfall ? '<div style="background:#fef3c7;border-radius:8px;padding:10px 14px;margin-bottom:12px;"><strong>⚠️ 陷阱：</strong>' + esc(t.expectedPitfall) + '</div>' : ''}
+
+        ${t.correctExplanation ? '<div style="background:#d1fae5;border-radius:8px;padding:10px 14px;margin-bottom:12px;"><strong>✅ 原理解释：</strong>' + esc(t.correctExplanation) + '</div>' : ''}
+
+        ${hintsHtml ? '<div style="margin-bottom:12px;"><strong style="font-size:13px;">💡 引导提示：</strong><ol style="margin:6px 0 0;padding-left:20px;font-size:13px;">' + hintsHtml + '</ol></div>' : ''}
+
+        <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn btn-sm btn-outline" onclick="voteCommunityTrap(${t.id})">👍 投票 (${t.voteCount || 0})</button>
+          <button class="btn btn-sm btn-success" onclick="loadCommunityToEditor(${t.id})">🎯 在练习中打开</button>
+          ${t.status === 'APPROVED' ? '<button class="btn btn-sm btn-primary" onclick="integrateCommunityTrap(' + t.id + ')">📚 导入题库</button>' : ''}
+        </div>
+      </div>
+    `;
+  } catch (e) { console.error(e); }
+}
+
+async function voteCommunityTrap(id) {
+  try {
+    const res = await api('POST', '/community/traps/' + id + '/vote');
+    if (res.code === 200) {
+      const trap = communityTraps.find(t => t.id === id);
+      if (trap) trap.voteCount = (trap.voteCount || 0) + 1;
+      renderCommunityList(communityTraps);
+      selectCommunityTrap(id);
+    }
+  } catch (e) { console.error(e); }
+}
+
+async function integrateCommunityTrap(id) {
+  if (!confirm('确认将这道社区陷阱导入题库？')) return;
+  try {
+    const res = await api('POST', '/community/traps/' + id + '/integrate');
+    if (res.code === 200) {
+      alert('✅ 已成功导入题库！');
+      loadCommunityTraps();
+      if (selectedCommunityId === id) selectCommunityTrap(id);
+    } else {
+      alert('❌ 导入失败: ' + (res.message || ''));
+    }
+  } catch (e) { alert('导入失败: ' + e.message); }
+}
+
+function loadCommunityToEditor(id) {
+  const t = communityTraps.find(t => t.id === id);
+  if (!t) return;
+  switchTab('practice');
+  if (editor) {
+    editor.setValue(t.trapCode);
+    originalCode = t.trapCode;
+    currentKnowledgePoint = t.knowledgePoint || t.title;
+    sessionId = null;
+    document.getElementById('scenario-info').textContent = '🤝 ' + (t.title);
+    document.getElementById('terminal-output').innerHTML = '<span style="color:#94a3b8;">来自社区陷阱：' + esc(t.title) + '</span>';
+    addGlobalMsg('system', '🤝 已加载社区陷阱「' + esc(t.title) + '」到编辑器中！');
+  }
+}
+
+function showCommunitySubmitModal() {
+  document.getElementById('community-submit-modal').style.display = 'flex';
+  document.getElementById('com-status').textContent = '';
+}
+
+async function submitCommunityTrap() {
+  const title = document.getElementById('com-title').value.trim();
+  const knowledgePoint = document.getElementById('com-knowledge').value.trim();
+  const javaVersion = document.getElementById('com-version').value;
+  const category = document.getElementById('com-category').value;
+  const trapCode = document.getElementById('com-code').value.trim();
+  const expectedPitfall = document.getElementById('com-pitfall').value.trim();
+  const correctExplanation = document.getElementById('com-explanation').value.trim();
+  const hintsRaw = document.getElementById('com-hints').value.trim();
+  const difficulty = parseInt(document.getElementById('com-difficulty').value);
+  const submitter = document.getElementById('com-submitter').value.trim() || 'anonymous';
+
+  if (!title) { alert('请输入陷阱标题'); return; }
+  if (title.length < 4) { alert('标题至少4个字'); return; }
+  if (!trapCode) { alert('请输入陷阱代码'); return; }
+  if (trapCode.length < 30) { alert('代码太短，请提供完整的可编译代码'); return; }
+  if (!expectedPitfall) { alert('请输入预期陷阱现象'); return; }
+
+  const hints = hintsRaw ? hintsRaw.split('|').map(s => s.trim()).filter(Boolean) : [];
+  const hintsJson = hints.length > 0 ? JSON.stringify(hints) : '';
+
+  const btn = document.querySelector('#community-submit-modal .btn-primary');
+  const status = document.getElementById('com-status');
+  btn.disabled = true;
+  status.textContent = '⏳ 提交中...';
+
+  try {
+    const res = await api('POST', '/community/submit', {
+      title, knowledgePoint, javaVersion, category,
+      trapCode, expectedPitfall, correctExplanation,
+      hints: hintsJson, difficulty, submitter
+    });
+    if (res.code === 200) {
+      status.innerHTML = '✅ 提交成功！等待审核后即可展示。';
+      closeModal('community-submit-modal');
+      document.getElementById('com-title').value = '';
+      document.getElementById('com-knowledge').value = '';
+      document.getElementById('com-code').value = '';
+      document.getElementById('com-pitfall').value = '';
+      document.getElementById('com-explanation').value = '';
+      document.getElementById('com-hints').value = '';
+      loadCommunityTraps();
+    } else {
+      status.textContent = '❌ 提交失败: ' + (res.message || '');
+    }
+  } catch (e) {
+    status.textContent = '❌ 网络错误: ' + e.message;
+  }
+  btn.disabled = false;
+}
+
+// ====================== Learning Reports ======================
+let currentReportType = 'WEEKLY';
+
+function switchReportType(btn, type) {
+  currentReportType = type;
+  document.querySelectorAll('#report-content .tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  loadReport();
+}
+
+async function loadReport() {
+  if (!isLoggedIn()) {
+    document.getElementById('report-content').innerHTML = '请先<a href="#" onclick="showAuthModal()" style="color:var(--primary);">登录</a>后查看学习报告';
+    document.getElementById('report-data').style.display = 'none';
+    return;
+  }
+
+  document.getElementById('report-content').innerHTML = '<div style="text-align:center;padding:40px;">⏳ 加载报告中...</div>';
+  document.getElementById('report-data').style.display = 'none';
+
+  try {
+    const res = await authApi('GET', '/report?userId=' + getUserId() + '&type=' + currentReportType);
+    if (res.code === 200 && res.data) {
+      renderReport(res.data);
+    } else {
+      document.getElementById('report-content').innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted);">暂无学习数据</div>';
+    }
+  } catch (e) {
+    document.getElementById('report-content').innerHTML = '<div style="text-align:center;padding:40px;color:var(--danger);">加载失败</div>';
+  }
+}
+
+function renderReport(data) {
+  document.getElementById('report-data').style.display = 'block';
+
+  // Summary cards
+  const summaryHtml = `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;text-align:center;">
+      <div style="font-size:24px;font-weight:700;color:var(--primary);">${data.totalQuestionsAnswered || 0}</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px;">答题数</div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;text-align:center;">
+      <div style="font-size:24px;font-weight:700;color:var(--success);">${data.accuracy ? data.accuracy.toFixed(1) : 0}%</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px;">正确率</div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;text-align:center;">
+      <div style="font-size:24px;font-weight:700;color:var(--warning);">${data.totalStudyMinutes || 0}</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px;">学习分钟</div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;text-align:center;">
+      <div style="font-size:24px;font-weight:700;color:var(--purple);">${data.studyDays || 0}</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px;">学习天数</div>
+    </div>
+  `;
+  document.getElementById('report-summary-cards').innerHTML = summaryHtml;
+
+  // Daily chart
+  const dailyEl = document.getElementById('report-daily-chart');
+  if (data.dailyStats && data.dailyStats.length > 0) {
+    let dailyHtml = '<div style="display:flex;gap:8px;align-items:end;min-height:150px;padding:10px 0;">';
+    data.dailyStats.forEach(d => {
+      const maxVal = Math.max(...data.dailyStats.map(s => Math.max(s.questionsAnswered || 0, s.studyMinutes || 0)), 1);
+      const height = Math.max(((d.questionsAnswered || 0) / maxVal) * 120, 4);
+      dailyHtml += '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;">';
+      dailyHtml += `<div style="width:100%;background:var(--primary);border-radius:4px 4px 0 0;height:${height}px;min-height:4px;opacity:0.8;" title="答题: ${d.questionsAnswered || 0}"></div>`;
+      dailyHtml += `<span style="font-size:10px;color:var(--muted);">${d.date ? d.date.substring(5) : ''}</span>`;
+      dailyHtml += '</div>';
+    });
+    dailyHtml += '</div>';
+    dailyEl.innerHTML = dailyHtml;
+  } else {
+    dailyEl.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted);">暂无每日学习数据</div>';
+  }
+
+  // Categories
+  const catEl = document.getElementById('report-categories');
+  if (data.categoryBreakdown && data.categoryBreakdown.length > 0) {
+    let catHtml = '';
+    data.categoryBreakdown.forEach(c => {
+      const rate = c.masteryRate || 0;
+      const color = rate >= 80 ? 'var(--success)' : rate >= 50 ? 'var(--warning)' : 'var(--danger)';
+      catHtml += '<div style="margin-bottom:12px;">';
+      catHtml += `<div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;"><span>${esc(String(c.category))}</span><span>${c.mastered}/${c.total} (${rate.toFixed(0)}%)</span></div>`;
+      catHtml += `<div style="height:8px;background:var(--bg);border-radius:4px;overflow:hidden;"><div style="height:100%;width:${rate}%;background:${color};border-radius:4px;transition:width 0.3s;"></div></div>`;
+      catHtml += '</div>';
+    });
+    catEl.innerHTML = catHtml;
+  } else {
+    catEl.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);">暂无分类数据</div>';
+  }
+
+  // Weaknesses
+  const weakEl = document.getElementById('report-weaknesses');
+  if (data.weakAreasList && data.weakAreasList.length > 0) {
+    let weakHtml = '';
+    data.weakAreasList.forEach(w => {
+      const score = w.weaknessScore || 0;
+      weakHtml += '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);">';
+      weakHtml += `<span style="font-size:13px;">${esc(String(w.category))}</span>`;
+      weakHtml += `<span style="font-size:12px;color:${score > 60 ? 'var(--danger)' : 'var(--warning)'};">${w.notMastered}/${w.total} 未掌握</span>`;
+      weakHtml += '</div>';
+    });
+    weakEl.innerHTML = weakHtml;
+  } else {
+    weakEl.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);">暂无薄弱数据</div>';
+  }
+
+  // Progress trend
+  const trendEl = document.getElementById('report-trend');
+  if (data.progressTrend && data.progressTrend.length > 0) {
+    let trendHtml = '<div style="display:flex;gap:8px;align-items:end;min-height:150px;padding:10px 0;">';
+    data.progressTrend.forEach(t => {
+      const acc = t.accuracy || 0;
+      const height = Math.max(acc * 1.2, 4);
+      const color = acc >= 80 ? 'var(--success)' : acc >= 50 ? 'var(--warning)' : 'var(--danger)';
+      trendHtml += '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;">';
+      trendHtml += `<div style="width:100%;background:${color};border-radius:4px 4px 0 0;height:${height}px;min-height:4px;" title="正确率: ${acc.toFixed(0)}%"></div>`;
+      trendHtml += `<span style="font-size:10px;color:var(--muted);">${t.date ? t.date.substring(5) : ''}</span>`;
+      trendHtml += '</div>';
+    });
+    trendHtml += '</div>';
+    trendEl.innerHTML = trendHtml;
+  } else {
+    trendEl.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted);">暂无趋势数据</div>';
+  }
+
+  // Recommendations
+  const recEl = document.getElementById('report-recommendations');
+  if (data.recommendations && data.recommendations.length > 0) {
+    let recHtml = '<ul style="margin:0;padding-left:20px;line-height:2;">';
+    data.recommendations.forEach(r => {
+      recHtml += `<li style="font-size:13px;">${esc(r)}</li>`;
+    });
+    recHtml += '</ul>';
+    if (data.focusAreas && data.focusAreas.length > 0) {
+      recHtml += '<div style="margin-top:12px;"><strong style="font-size:13px;">重点提升方向：</strong>';
+      recHtml += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">';
+      data.focusAreas.forEach(f => {
+        recHtml += `<span style="padding:4px 12px;background:var(--primary-light);color:var(--primary);border-radius:12px;font-size:12px;">${esc(f)}</span>`;
+      });
+      recHtml += '</div></div>';
+    }
+    recEl.innerHTML = recHtml;
+  } else {
+    recEl.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);">暂无建议</div>';
+  }
+
+  document.getElementById('report-content').innerHTML = '';
+  document.getElementById('report-data').style.display = 'block';
+}
+
+// Override switchTab to load report when switching to reports tab
+const originalSwitchTab = switchTab;
+switchTab = function(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.toggle('active', t.id === 'tab-' + tab));
+  if (tab === 'questions') loadQuestions();
+  if (tab === 'cards') loadCards();
+  if (tab === 'progress') loadProgress();
+  if (tab === 'community') loadCommunityTraps();
+  if (tab === 'reports') loadReport();
+  if (tab === 'practice' && editor) setTimeout(() => editor.layout(), 100);
+};
+
 // ====================== Helpers ======================
-function esc(s) { if (!s) return ''; s = String(s); return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/`/g,'\\`'); }
+function esc(s) { if (!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function setStatus(text) { document.getElementById('status-badge').textContent = text; }
 </script>
 </body>

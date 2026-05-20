@@ -11,6 +11,7 @@ import com.cortex.entity.AgentMetadata;
 import com.cortex.entity.Task;
 import com.cortex.mapper.TaskMapper;
 import com.cortex.service.MemoryService;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -58,11 +59,12 @@ public class CortexController {
     @PostMapping("/task/execute")
     public ApiResponse<TaskGraph> executeTask(@RequestBody ExecuteTaskRequest request) {
         try {
-            Task task = taskMapper.selectById(request.getTaskId());
+            Task task = taskMapper.selectOne(
+                new LambdaQueryWrapper<Task>().eq(Task::getTaskId, request.getTaskId()));
             if (task == null) {
                 return ApiResponse.error("任务不存在");
             }
-            
+
             TaskGraph graph = JSON.parseObject(task.getTaskGraph(), TaskGraph.class);
             graph = cortexTaskExecutor.execute(graph, request.getUserId());
             
@@ -119,7 +121,8 @@ public class CortexController {
     
     @GetMapping("/task/{taskId}")
     public ApiResponse<Task> getTask(@PathVariable String taskId) {
-        Task task = taskMapper.selectById(taskId);
+        Task task = taskMapper.selectOne(
+            new LambdaQueryWrapper<Task>().eq(Task::getTaskId, taskId));
         if (task == null) {
             return ApiResponse.error("任务不存在");
         }
