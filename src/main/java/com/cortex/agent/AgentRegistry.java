@@ -12,13 +12,16 @@ import com.cortex.llm.LlmRequest;
 import com.cortex.llm.LlmResponse;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONArray;
 import cn.hutool.core.util.StrUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PostConstruct;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
@@ -56,7 +59,14 @@ public class AgentRegistry {
         return agentCache.values().stream()
                 .filter(agent -> {
                     String capabilities = agent.getCapabilities();
-                    return capabilities != null && capabilities.contains(capability);
+                    if (capabilities == null) {
+                        return false;
+                    }
+                    try {
+                        return JSONArray.parseArray(capabilities, String.class).contains(capability);
+                    } catch (Exception e) {
+                        return capabilities.contains(capability);
+                    }
                 })
                 .sorted((a, b) -> b.getPriority().compareTo(a.getPriority()))
                 .toList();

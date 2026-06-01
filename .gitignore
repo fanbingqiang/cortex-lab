@@ -15,3 +15,6 @@ data/
 *.trace.db
 .claude/
 .env
+
+# frontend build output
+src/main/resources/static/lab/

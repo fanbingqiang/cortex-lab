@@ -8,6 +8,13 @@ import com.cortex.lab.entity.*;
 import com.cortex.lab.mapper.*;
 import com.cortex.llm.LlmClient;
 import com.cortex.llm.LlmRequest;
+import com.cortex.lab.entity.UserLearningProfile;
+import com.cortex.lab.mapper.UserLearningProfileMapper;
+import com.cortex.entity.MistakeRecord;
+import com.cortex.mapper.MistakeRecordMapper;
+import com.cortex.lab.service.KnowledgeTreeService;
+import com.cortex.lab.service.SandboxService;
+import com.cortex.lab.dto.ExecuteResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -32,6 +39,10 @@ public class AssistantService {
     private final RagService ragService;
     private final EvolutionService evolutionService;
     private final QuestionBankMapper questionBankMapper;
+    private final UserLearningProfileMapper userLearningProfileMapper;
+    private final MistakeRecordMapper mistakeRecordMapper;
+    private final KnowledgeTreeService knowledgeTreeService;
+    private final SandboxService sandboxService;
 
     private static final String SYSTEM_PROMPT = """
 你是一个智能编程导师"小C"，运行在代码练习平台 Cortex Lab 中。
@@ -49,6 +60,7 @@ public class AssistantService {
 - {"type":"loadToEditor","payload":题目ID} — 加载代码到编辑器
 - {"type":"runCode"} — 运行代码
 - {"type":"resetCode"} — 重置代码
+- {"type":"executeCode","payload":"完整的Java代码（含public class和main方法）"} — 编译并执行Java代码，返回真实输出。当你需要确认代码输出、验证想法时用这个
 
 ## 代码修改操作
 用户可以要求你直接修改编辑器中的代码。修改前先解释要改什么、为什么改，
@@ -64,6 +76,9 @@ public class AssistantService {
 
 3. deleteCode — 删除指定范围的代码
    {"type":"deleteCode","payload":{"startLine":行号,"startCol":列号,"endLine":行号,"endCol":列号}}
+
+## 用户当前状态
+%s
 
 ## 题库列表
 %s
@@ -84,8 +99,11 @@ public class AssistantService {
 {
   "reply": "你的回答",
   "action": {"type": "操作名", "payload": 参数},
-  "suggestions": ["建议1", "建议2"]
+  "suggestions": ["建议1", "建议2", "建议3"]
 }
+
+重要：suggestions必须根据用户当前状态生成3个具体的、可点击的建议，不要用"换个问题"这种通用建议。
+    例如用户HashMap相关错误多，应该建议"生成HashMap陷阱题"、"看看ConcurrentHashMap区别"。
 """;
 
     // AI 对话：构造上下文、调用 LLM、解析返回
@@ -100,6 +118,7 @@ public class AssistantService {
 
         saveMessage(conversationId, "user", request.getMessage(), null);
 
+        String userContext = buildUserContext(request.getUserId());
         String questionList = buildQuestionList();
         String codeContext = buildCodeContext(request);
         String ragContext = buildRagContext(request.getMessage(), config);
@@ -107,6 +126,7 @@ public class AssistantService {
         String history = buildHistory(conversationId, config);
 
         String systemPrompt = SYSTEM_PROMPT.formatted(
+            userContext,
             questionList,
             codeContext,
             ragContext,
@@ -160,6 +180,7 @@ public class AssistantService {
 
         saveMessage(conversationId, "user", request.getMessage(), null);
 
+        String userContext = buildUserContext(request.getUserId());
         String questionList = buildQuestionList();
         String codeContext = buildCodeContext(request);
         String ragContext = buildRagContext(request.getMessage(), config);
@@ -167,7 +188,7 @@ public class AssistantService {
         String history = buildHistory(conversationId, config);
 
         String systemPrompt = SYSTEM_PROMPT.formatted(
-            questionList, codeContext, ragContext, evolutionContext,
+            userContext, questionList, codeContext, ragContext, evolutionContext,
             config.getOrDefault("max_history_length", "20"), history
         );
 
@@ -216,6 +237,23 @@ public class AssistantService {
                             meta.put("conversationId", convId);
                             meta.put("suggestions", parsed.getSuggestions() != null ? parsed.getSuggestions() : new java.util.ArrayList<>());
                             meta.put("action", parsed.getAction());
+
+                            // Handle executeCode action: actually compile and run
+                            if (parsed.getAction() != null && "executeCode".equals(parsed.getAction().get("type"))) {
+                                String code = (String) parsed.getAction().get("payload");
+                                if (code != null && !code.isBlank()) {
+                                    String execResult = executeCodeAction(code);
+                                    String updatedReply = parsed.getReply() + "\n\n" + execResult;
+                                    parsed.setReply(updatedReply);
+                                    try {
+                                        emitter.send(SseEmitter.event()
+                                            .name("chunk")
+                                            .data("\n\n" + execResult));
+                                    } catch (Exception e) {
+                                        log.warn("发送执行结果失败", e);
+                                    }
+                                }
+                            }
 
                             emitter.send(SseEmitter.event()
                                 .name("metadata")
@@ -399,7 +437,26 @@ public class AssistantService {
         StringBuilder sb = new StringBuilder();
         if (kp != null && !kp.isBlank()) sb.append("当前知识点：").append(kp).append("\n");
         if (code != null && !code.isBlank()) {
-            sb.append("当前编辑器中的代码：\n```java\n").append(code).append("\n```");
+            sb.append("当前编辑器中的代码：\n```java\n").append(code).append("\n```\n");
+        }
+        // 原始代码对比（用于分析用户改了什么）
+        String original = request.getOriginalCode();
+        if (original != null && !original.isBlank() && !original.equals(code)) {
+            sb.append("原始代码（用户可能修改了）：\n```java\n").append(original).append("\n```\n");
+            // 简单标注差异
+            if (original.length() == code.length()) {
+                for (int i = 0; i < Math.min(original.length(), code.length()); i++) {
+                    if (original.charAt(i) != code.charAt(i)) {
+                        sb.append("注意：代码在第").append(i + 1).append("个字符处与原始代码不同\n");
+                        break;
+                    }
+                }
+            }
+        }
+        // 执行输出
+        String execOut = request.getExecutionOutput();
+        if (execOut != null && !execOut.isBlank()) {
+            sb.append("用户上次运行的输出：\n```\n").append(execOut).append("\n```\n");
         }
         return sb.toString();
     }
@@ -526,6 +583,95 @@ public class AssistantService {
             }
         } catch (Exception e) {
             log.warn("删除对话失败: {}", e.getMessage());
+        }
+    }
+
+    // 构建用户当前状态上下文，用于生成动态建议
+    private String buildUserContext(String userId) {
+        if (userId == null || userId.isBlank() || "anonymous".equals(userId)) {
+            return "（用户未登录）";
+        }
+        StringBuilder sb = new StringBuilder();
+
+        // 学习统计
+        try {
+            UserLearningProfile profile = userLearningProfileMapper.selectOne(
+                new LambdaQueryWrapper<UserLearningProfile>()
+                    .eq(UserLearningProfile::getUserId, userId)
+                    .last("LIMIT 1")
+            );
+            if (profile != null) {
+                int total = profile.getTotalQuestionsAnswered() != null ? profile.getTotalQuestionsAnswered() : 0;
+                int correct = profile.getTotalCorrect() != null ? profile.getTotalCorrect() : 0;
+                int streak = profile.getStudyStreak() != null ? profile.getStudyStreak() : 0;
+                double acc = total > 0 ? (correct * 100.0 / total) : 0;
+                sb.append("- 学习统计：共").append(total).append("题，正确率").append(String.format("%.0f", acc)).append("%\n");
+                sb.append("- 连续学习：").append(streak).append("天\n");
+                if (profile.getWeakAreas() != null && !profile.getWeakAreas().isBlank()) {
+                    sb.append("- 薄弱领域：").append(profile.getWeakAreas()).append("\n");
+                }
+            }
+        } catch (Exception e) {
+            log.warn("读取学习画像失败: {}", e.getMessage());
+        }
+
+        // 近期错误记录
+        try {
+            List<MistakeRecord> mistakes = mistakeRecordMapper.selectList(
+                new LambdaQueryWrapper<MistakeRecord>()
+                    .eq(MistakeRecord::getUserId, userId)
+                    .orderByDesc(MistakeRecord::getGmtCreate)
+                    .last("LIMIT 5")
+            );
+            if (!mistakes.isEmpty()) {
+                sb.append("- 近期错误：\n");
+                for (MistakeRecord m : mistakes) {
+                    sb.append("  * ").append(m.getKeyword()).append("：").append(m.getDescription()).append("\n");
+                }
+            }
+        } catch (Exception e) {
+            log.warn("读取错误记录失败: {}", e.getMessage());
+        }
+
+        // 已掌握的知识节点
+        try {
+            List<String> mastered = knowledgeTreeService.getMasteredNodeIds(userId);
+            if (!mastered.isEmpty()) {
+                sb.append("- 已掌握：").append(String.join("、", mastered)).append("\n");
+            }
+        } catch (Exception e) {
+            log.warn("读取掌握节点失败: {}", e.getMessage());
+        }
+
+        return sb.isEmpty() ? "（暂无学习数据）" : sb.toString();
+    }
+
+    // 执行 executeCode 动作：编译运行 Java 代码
+    private String executeCodeAction(String code) {
+        try {
+            ExecuteResponse result = sandboxService.execute(code);
+            StringBuilder sb = new StringBuilder();
+            sb.append("【代码执行结果】\n");
+            if (result.isSuccess()) {
+                sb.append("退出码: ").append(result.getExitCode()).append("\n");
+                if (result.getStdout() != null && !result.getStdout().isBlank()) {
+                    sb.append("输出:\n").append(result.getStdout());
+                }
+            } else {
+                sb.append("执行失败:\n");
+                if (result.getStdout() != null && !result.getStdout().isBlank()) {
+                    sb.append(result.getStdout()).append("\n");
+                }
+                if (result.getStderr() != null && !result.getStderr().isBlank()) {
+                    sb.append(result.getStderr()).append("\n");
+                }
+                if (result.getError() != null) {
+                    sb.append(result.getError());
+                }
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return "代码执行异常: " + e.getMessage();
         }
     }
 }
