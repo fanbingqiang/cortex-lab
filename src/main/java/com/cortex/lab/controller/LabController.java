@@ -28,6 +28,7 @@ public class LabController {
     private final KnowledgeCardService knowledgeCardService;
     private final DiscussionService discussionService;
     private final AssistantService assistantService;
+    private final TutorService tutorService;
     private final KnowledgeTreeService knowledgeTreeService;
     private final SpringProjectService springProjectService;
     private final CommunityTrapService communityTrapService;
@@ -492,6 +493,16 @@ public class LabController {
 
     // ==================== 全局AI助手 ====================
 
+    @GetMapping("/assistant/welcome")
+    public ApiResponse<GlobalChatResponse> assistantWelcome(@RequestParam(defaultValue = "anonymous") String userId) {
+        try {
+            return ApiResponse.success(assistantService.welcome(userId));
+        } catch (Exception e) {
+            log.error("获取欢迎信息失败", e);
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
     @PostMapping("/assistant/chat")
     public ApiResponse<GlobalChatResponse> assistantChat(@RequestBody GlobalChatRequest request) {
         // AI 助手对话
@@ -582,6 +593,46 @@ public class LabController {
             return ApiResponse.success(null);
         } catch (Exception e) {
             log.error("提交反馈失败", e);
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
+    // ==================== 导师自评 ====================
+
+    @PostMapping("/tutor/assess")
+    public ApiResponse<TutorReviewResponse> tutorAssess(@RequestBody TutorReviewRequest request) {
+        // 用户自评：答对/答错，AI返回点评+拓展知识点
+        try {
+            if (request.getQuestionId() == null) {
+                return ApiResponse.error("题目ID不能为空");
+            }
+            TutorReviewResponse resp = tutorService.assess(
+                request.getQuestionId(),
+                request.getUserId(),
+                request.isCorrect()
+            );
+            return ApiResponse.success(resp);
+        } catch (Exception e) {
+            log.error("导师点评失败", e);
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
+    @PostMapping("/tutor/explain-tip")
+    public ApiResponse<TutorExplainResponse> tutorExplainTip(@RequestBody TutorExplainRequest request) {
+        // 解释某个拓展知识点
+        try {
+            if (request.getQuestionId() == null || request.getTip() == null) {
+                return ApiResponse.error("参数不完整");
+            }
+            TutorExplainResponse resp = tutorService.explainTip(
+                request.getQuestionId(),
+                request.getTip(),
+                request.getUserId()
+            );
+            return ApiResponse.success(resp);
+        } catch (Exception e) {
+            log.error("解释知识点失败", e);
             return ApiResponse.error(e.getMessage());
         }
     }

@@ -5,8 +5,10 @@ import com.cortex.agent.AgentRegistry;
 import com.cortex.dto.ApiResponse;
 import com.cortex.dto.TaskGraph;
 import com.cortex.dto.UserProfileDto;
-import com.cortex.engine.TaskDecomposer;
 import com.cortex.engine.CortexTaskExecutor;
+import com.cortex.engine.TaskDecomposer;
+import com.cortex.engine.TaskEventService;
+import com.cortex.engine.TaskExecutionEvent;
 import com.cortex.entity.AgentMetadata;
 import com.cortex.entity.Task;
 import com.cortex.mapper.TaskMapper;
@@ -16,6 +18,7 @@ import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -30,6 +33,7 @@ public class CortexController {
     private final TaskDecomposer taskDecomposer;
     private final CortexTaskExecutor cortexTaskExecutor;
     private final AgentRegistry agentRegistry;
+    private final TaskEventService taskEventService;
     private final MemoryService memoryService;
     private final TaskMapper taskMapper;
     
@@ -66,15 +70,17 @@ public class CortexController {
             }
 
             TaskGraph graph = JSON.parseObject(task.getTaskGraph(), TaskGraph.class);
-            graph = cortexTaskExecutor.execute(graph, request.getUserId());
-            
+            graph = cortexTaskExecutor.execute(graph, request.getUserId(), event -> {
+                taskEventService.publish(event.getTaskId(), event.getEventName(), event.getData());
+            });
+
             String result = cortexTaskExecutor.aggregateResult(graph);
             task.setTaskGraph(JSON.toJSONString(graph));
             task.setResult(result);
             task.setStatus("COMPLETED");
             task.setGmtModified(LocalDateTime.now());
             taskMapper.updateById(task);
-            
+
             return ApiResponse.success("任务执行成功", graph);
         } catch (Exception e) {
             log.error("执行任务失败", e);
@@ -86,7 +92,7 @@ public class CortexController {
     public ApiResponse<Map<String, Object>> runTask(@RequestBody CreateTaskRequest request) {
         try {
             TaskGraph graph = taskDecomposer.decompose(request.getRequirement());
-            
+
             Task task = new Task();
             task.setTaskId(graph.getTaskId());
             task.setUserId(request.getUserId());
@@ -97,16 +103,18 @@ public class CortexController {
             task.setGmtCreate(LocalDateTime.now());
             task.setGmtModified(LocalDateTime.now());
             taskMapper.insert(task);
-            
-            graph = cortexTaskExecutor.execute(graph, request.getUserId());
-            
+
+            graph = cortexTaskExecutor.execute(graph, request.getUserId(), event -> {
+                taskEventService.publish(event.getTaskId(), event.getEventName(), event.getData());
+            });
+
             String result = cortexTaskExecutor.aggregateResult(graph);
             task.setTaskGraph(JSON.toJSONString(graph));
             task.setResult(result);
             task.setStatus("COMPLETED");
             task.setGmtModified(LocalDateTime.now());
             taskMapper.updateById(task);
-            
+
             return ApiResponse.success("任务执行成功", Map.of(
                 "taskId", graph.getTaskId(),
                 "title", graph.getTitle(),
@@ -119,6 +127,11 @@ public class CortexController {
         }
     }
     
+    @GetMapping("/task/stream/{taskId}")
+    public SseEmitter streamTask(@PathVariable String taskId) {
+        return taskEventService.register(taskId);
+    }
+
     @GetMapping("/task/{taskId}")
     public ApiResponse<Task> getTask(@PathVariable String taskId) {
         Task task = taskMapper.selectOne(

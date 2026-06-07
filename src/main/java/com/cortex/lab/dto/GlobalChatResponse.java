@@ -13,4 +13,5 @@ public class GlobalChatResponse {
     private String askReason;
     private List<String> suggestions;
     private Map<String, Object> action;
+    private boolean silent; // true=静默执行action，不在聊天框显示回复
 }

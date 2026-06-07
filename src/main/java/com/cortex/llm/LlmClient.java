@@ -98,12 +98,12 @@ public class LlmClient {
     // ==================== 流式 SSE 调用 ====================
 
     // 流式聊天，使用默认配置
-    public void chatStream(LlmRequest request, Consumer<String> onChunk, Runnable onComplete, Consumer<Exception> onError) {
-        chatStream(llmConfig.getDefaultConfig().getBaseUrl(), llmConfig.getDefaultConfig().getApiKey(), request, onChunk, onComplete, onError);
+    public void chatStream(LlmRequest request, Consumer<String> onChunk, Consumer<String> onThinking, Runnable onComplete, Consumer<Exception> onError) {
+        chatStream(llmConfig.getDefaultConfig().getBaseUrl(), llmConfig.getDefaultConfig().getApiKey(), request, onChunk, onThinking, onComplete, onError);
     }
 
     // 流式聊天，指定 baseUrl 和 apiKey
-    public void chatStream(String baseUrl, String apiKey, LlmRequest request, Consumer<String> onChunk, Runnable onComplete, Consumer<Exception> onError) {
+    public void chatStream(String baseUrl, String apiKey, LlmRequest request, Consumer<String> onChunk, Consumer<String> onThinking, Runnable onComplete, Consumer<Exception> onError) {
         if (StrUtil.isBlank(apiKey) || "your-api-key-here".equals(apiKey)) {
             onError.accept(new RuntimeException("请配置有效的API Key"));
             return;
@@ -147,9 +147,9 @@ public class LlmClient {
                                 if (choice.containsKey("delta")) {
                                     var delta = choice.getJSONObject("delta");
                                     String content = delta.getString("content");
-                                    if (content != null) {
-                                        onChunk.accept(content);
-                                    }
+                                    if (content != null) onChunk.accept(content);
+                                    String reasoning = delta.getString("reasoning_content");
+                                    if (reasoning != null && onThinking != null) onThinking.accept(reasoning);
                                 }
                             }
                         }
@@ -167,7 +167,7 @@ public class LlmClient {
     }
 
     // 流式聊天，完整参数版本
-    public void chatStream(String apiKey, String baseUrl, String model, LlmRequest request, Consumer<String> onChunk, Runnable onComplete, Consumer<Exception> onError) {
+    public void chatStream(String apiKey, String baseUrl, String model, LlmRequest request, Consumer<String> onChunk, Consumer<String> onThinking, Runnable onComplete, Consumer<Exception> onError) {
         if (StrUtil.isBlank(apiKey) || "your-api-key-here".equals(apiKey)) {
             onError.accept(new RuntimeException("请配置有效的API Key"));
             return;
@@ -207,8 +207,11 @@ public class LlmClient {
                             if (choices != null && !choices.isEmpty()) {
                                 var choice = choices.getJSONObject(0);
                                 if (choice.containsKey("delta")) {
-                                    String content = choice.getJSONObject("delta").getString("content");
+                                    var delta = choice.getJSONObject("delta");
+                                    String content = delta.getString("content");
                                     if (content != null) onChunk.accept(content);
+                                    String reasoning = delta.getString("reasoning_content");
+                                    if (reasoning != null && onThinking != null) onThinking.accept(reasoning);
                                 }
                             }
                         }

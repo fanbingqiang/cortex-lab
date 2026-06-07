@@ -3,16 +3,17 @@ package com.cortex.agent;
 import com.cortex.entity.AgentMetadata;
 import com.cortex.mapper.AgentMetadataMapper;
 import com.cortex.mapper.MistakeRecordMapper;
-import com.cortex.mapper.UserProfileMapper;
-import com.cortex.dto.UserProfileDto;
-import com.cortex.entity.MistakeRecord;
-import com.cortex.entity.UserProfile;
+import com.cortex.lab.entity.User;
+import com.cortex.lab.mapper.UserMapper;
+import com.cortex.mapper.MistakeRecordMapper;
 import com.cortex.llm.LlmClient;
 import com.cortex.llm.LlmRequest;
 import com.cortex.llm.LlmResponse;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
+import com.cortex.dto.UserProfileDto;
+import com.cortex.entity.MistakeRecord;
 import cn.hutool.core.util.StrUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -31,7 +32,7 @@ public class AgentRegistry {
     
     private final AgentMetadataMapper agentMetadataMapper;
     private final LlmClient llmClient;
-    private final UserProfileMapper userProfileMapper;
+    private final UserMapper userProfileMapper;
     private final MistakeRecordMapper mistakeRecordMapper;
     
     private final Map<String, AgentMetadata> agentCache = new ConcurrentHashMap<>();
@@ -120,8 +121,8 @@ public class AgentRegistry {
     }
     
     private UserProfileDto getUserProfile(String userId) {
-        UserProfile profile = userProfileMapper.selectOne(
-            new LambdaQueryWrapper<UserProfile>().eq(UserProfile::getUserId, userId));
+        User profile = userProfileMapper.selectOne(
+            new LambdaQueryWrapper<User>().eq(User::getUserId, userId));
         if (profile == null) {
             return null;
         }
@@ -129,7 +130,7 @@ public class AgentRegistry {
         UserProfileDto dto = new UserProfileDto();
         dto.setUserId(profile.getUserId());
         dto.setUsername(profile.getUsername());
-        
+
         if (StrUtil.isNotBlank(profile.getPersonalityTags())) {
             dto.setPersonalityTags(JSON.parseArray(profile.getPersonalityTags(), String.class));
         }
