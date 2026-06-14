@@ -153,7 +153,7 @@ public class QuestionBankService {
         String prompt = GENERATE_PROMPT.formatted(userQuestion);
         try {
             String result = llmClient.chatSimple(prompt);
-            result = cleanJson(result);
+            result = com.cortex.util.JsonUtils.cleanJson(result);
             QuestionDto dto = JSON.parseObject(result, QuestionDto.class);
 
             QuestionBank entity = new QuestionBank();
@@ -378,7 +378,7 @@ public class QuestionBankService {
         String prompt = CARD_GENERATE_PROMPT.formatted(q.getTitle(), q.getExpectedPitfall(), q.getCorrectExplanation());
         try {
             String result = llmClient.chatSimple(prompt);
-            result = cleanJson(result);
+            result = com.cortex.util.JsonUtils.cleanJson(result);
             CardGenResponse gen = JSON.parseObject(result, CardGenResponse.class);
 
             KnowledgeCard card = new KnowledgeCard();
@@ -407,19 +407,6 @@ public class QuestionBankService {
         private String detailExplanation;
         private String codeSnippet;
         private String commonPitfalls;
-    }
-
-    private String cleanJson(String raw) {
-        if (raw == null) return "{}";
-        raw = raw.trim();
-        if (raw.startsWith("```")) {
-            int start = raw.indexOf('\n');
-            int end = raw.lastIndexOf("```");
-            if (start > 0 && end > start) {
-                raw = raw.substring(start, end).trim();
-            }
-        }
-        return raw;
     }
 
     private QuestionDto toDto(QuestionBank entity) {

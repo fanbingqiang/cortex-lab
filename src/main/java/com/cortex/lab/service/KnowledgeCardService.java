@@ -68,7 +68,7 @@ public class KnowledgeCardService {
         String prompt = CARD_PROMPT.formatted(q.getTitle(), q.getExpectedPitfall(), q.getCorrectExplanation());
         try {
             String result = llmClient.chatSimple(prompt);
-            result = cleanJson(result);
+            result = com.cortex.util.JsonUtils.cleanJson(result);
             CardGen gen = JSON.parseObject(result, CardGen.class);
 
             KnowledgeCard card = new KnowledgeCard();
@@ -125,17 +125,6 @@ public class KnowledgeCardService {
         private String detailExplanation;
         private String codeSnippet;
         private String commonPitfalls;
-    }
-
-    private String cleanJson(String raw) {
-        if (raw == null) return "{}";
-        raw = raw.trim();
-        if (raw.startsWith("```")) {
-            int start = raw.indexOf('\n');
-            int end = raw.lastIndexOf("```");
-            if (start > 0 && end > start) raw = raw.substring(start, end).trim();
-        }
-        return raw;
     }
 
     private CardDto toDto(KnowledgeCard card) {

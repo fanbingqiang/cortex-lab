@@ -12,10 +12,8 @@ import com.cortex.llm.LlmClient;
 import com.cortex.llm.LlmRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import okhttp3.*;
 import org.springframework.stereotype.Service;
 
-import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -32,12 +30,6 @@ public class KnowledgeTreeService {
     private final LlmClient llmClient;
     private final AssistantConfigMapper configMapper;
     private final SpringProjectService springProjectService;
-
-    private final OkHttpClient httpClient = new OkHttpClient.Builder()
-            .connectTimeout(60, TimeUnit.SECONDS)
-            .readTimeout(120, TimeUnit.SECONDS)
-            .writeTimeout(60, TimeUnit.SECONDS)
-            .build();
 
     // 获取完整知识树
     public List<KnowledgeNodeDTO> getTree() {
@@ -266,16 +258,16 @@ public class KnowledgeTreeService {
             return toDto(existing);
         }
 
-        // Try to generate via LLM (user-configured API key or env)
+        // Try to generate via LLM (user-configured API key or env default)
         try {
             Map<String, String> llmConfig = getUserLlmConfig();
-            String result;
-            if (llmConfig.get("api_key") != null) {
-                result = callLlmApi(llmConfig, buildPrompt(knowledgePoint, description));
-            } else {
-                result = llmClient.chatSimple(buildPrompt(knowledgePoint, description));
-            }
-            String cleaned = cleanJson(result);
+            String result = llmClient.chatSimple(
+                    llmConfig.get("api_key"),
+                    llmConfig.get("base_url"),
+                    llmConfig.get("model"),
+                    null,
+                    buildPrompt(knowledgePoint, description));
+            String cleaned = com.cortex.util.JsonUtils.cleanJson(result);
             ScenarioDto dto = JSON.parseObject(cleaned, ScenarioDto.class);
 
             LabScenario entity = new LabScenario();
@@ -348,19 +340,6 @@ public class KnowledgeTreeService {
         return "Java";
     }
 
-    private String cleanJson(String raw) {
-        if (raw == null) return "{}";
-        raw = raw.trim();
-        if (raw.startsWith("```")) {
-            int start = raw.indexOf('\n');
-            int end = raw.lastIndexOf("```");
-            if (start > 0 && end > start) {
-                raw = raw.substring(start, end).trim();
-            }
-        }
-        return raw;
-    }
-
     private ScenarioDto toDto(LabScenario entity) {
         ScenarioDto dto = new ScenarioDto();
         dto.setId(entity.getId());
@@ -394,43 +373,5 @@ public class KnowledgeTreeService {
             log.warn("读取LLM配置失败: {}", e.getMessage());
         }
         return cfg;
-    }
-
-    private String callLlmApi(Map<String, String> llmConfig, String prompt) {
-        String apiKey = llmConfig.get("api_key");
-        String baseUrl = llmConfig.get("base_url");
-        String model = llmConfig.get("model");
-        if (apiKey == null || apiKey.isBlank()) {
-            throw new RuntimeException("请先配置 API Key");
-        }
-        String url = baseUrl + "/chat/completions";
-        String jsonBody = "{\n" +
-            "  \"model\": " + JSON.toJSONString(model) + ",\n" +
-            "  \"messages\": [{\"role\": \"user\", \"content\": " + JSON.toJSONString(prompt) + "}],\n" +
-            "  \"temperature\": 0.7,\n" +
-            "  \"max_tokens\": 4096\n" +
-            "}";
-
-        Request request = new Request.Builder()
-            .url(url)
-            .addHeader("Authorization", "Bearer " + apiKey)
-            .addHeader("Content-Type", "application/json")
-            .post(RequestBody.create(jsonBody, MediaType.parse("application/json")))
-            .build();
-
-        try (Response response = httpClient.newCall(request).execute()) {
-            if (!response.isSuccessful()) {
-                String errorBody = response.body() != null ? response.body().string() : "Unknown error";
-                throw new RuntimeException("API调用失败: " + response.code() + " - " + errorBody);
-            }
-            String responseBody = response.body().string();
-            var jsonResponse = JSON.parseObject(responseBody);
-            return jsonResponse.getJSONArray("choices")
-                .getJSONObject(0)
-                .getJSONObject("message")
-                .getString("content");
-        } catch (IOException e) {
-            throw new RuntimeException("API调用异常: " + e.getMessage(), e);
-        }
     }
 }

@@ -46,8 +46,9 @@ public class AssistantService {
     private final SandboxService sandboxService;
     private final QuestionBankService questionBankService;
     private final KnowledgeCardService knowledgeCardService;
+    private final PlatformFeatureService platformFeatureService;
 
-    private static final String SYSTEM_PROMPT = """
+    private static final String BASE_SYSTEM_PROMPT = """
 你是一个智能编程导师"小C"，运行在代码练习平台 Cortex Lab 中。
 你可以回答编程问题，也可以执行平台操作。用户可以要求你修改编辑器中的代码。
 需要操作时在 action 中指定；不需要时 action 设为 null。
@@ -100,6 +101,12 @@ public class AssistantService {
 - {"type":"generateCard","payload":题目ID} — 为题目生成知识卡片
 - {"type":"deleteCard","payload":卡片ID} — 删除知识卡片
 
+## 平台功能调用
+当用户提到学习报告、社区陷阱、讨论、导师自评等平台功能时，
+使用 callFeature 自动调用：
+{"type":"callFeature","payload":{"feature":"功能名","params":参数}}
+功能列表见下方【平台功能】。
+
 ## 输出格式（严格JSON）
 {
   "reply": "你的回答（执行操作时不超过10字或空字符串）",
@@ -118,6 +125,10 @@ public class AssistantService {
 - suggestions必须根据用户当前状态生成3个具体的、可点击的建议，不要用"换个问题"这种通用建议。
     例如用户HashMap相关错误多，应该建议"生成HashMap陷阱题"、"看看ConcurrentHashMap区别"。
 """;
+
+    private String buildSystemPrompt() {
+        return BASE_SYSTEM_PROMPT + platformFeatureService.buildFeaturePrompt();
+    }
 
     // 主动欢迎：根据用户学习状态生成问候和建议
     public GlobalChatResponse welcome(String userId) {
@@ -234,61 +245,58 @@ public class AssistantService {
         return msgs;
     }
 
-    // AI 对话：构造上下文、调用 LLM、解析返回
-    public GlobalChatResponse chat(GlobalChatRequest request) {
-        Map<String, String> config = loadConfig();
+    /** 聊天会话上下文 */
+    private record ChatContext(Map<String, String> config, String conversationId, String apiKey, String baseUrl,
+                               String model, LlmRequest llmRequest) {}
 
+    /** 聊天前置准备：加载配置、管理对话、构建消息、创建 LLM 请求 */
+    private ChatContext prepareChat(GlobalChatRequest request) {
+        Map<String, String> config = loadConfig();
         String conversationId = request.getConversationId();
         if (conversationId == null || conversationId.isBlank()) {
             conversationId = UUID.randomUUID().toString();
             createConversation(conversationId, request.getUserId(), request.getMessage());
         }
-
         saveMessage(conversationId, "user", request.getMessage(), null);
-
         String apiKey = config.getOrDefault("api_key", "");
         String baseUrl = config.getOrDefault("base_url", "");
         String model = config.getOrDefault("model", "deepseek-chat");
+        List<LlmRequest.Message> msgs = new ArrayList<>();
+        msgs.add(new LlmRequest.Message("system", buildSystemPrompt()));
+        msgs.addAll(buildContextMessages(request.getUserId(), request, config, conversationId));
+        msgs.add(new LlmRequest.Message("user", request.getMessage()));
+        LlmRequest llmReq = new LlmRequest();
+        llmReq.setModel(model);
+        llmReq.setMessages(msgs);
+        llmReq.setTemperature(Double.parseDouble(config.getOrDefault("temperature", "0.7")));
+        llmReq.setMaxTokens(Integer.parseInt(config.getOrDefault("max_tokens", "2048")));
+        return new ChatContext(config, conversationId, apiKey, baseUrl, model, llmReq);
+    }
 
+    /** 对话后处理：保存助手消息、进化学习 */
+    private void afterChat(String conversationId, String userMsg, String reply) {
+        if (reply == null || reply.isBlank()) return;
+        saveMessage(conversationId, "assistant", reply, null);
+        updateConversationCount(conversationId);
+        evolutionService.extractInsightFromConversation(conversationId, List.of(userMsg, reply));
+        evolutionService.indexKnowledgeCards(conversationId, userMsg, reply);
+    }
+
+    // AI 对话：构造上下文、调用 LLM、解析返回
+    public GlobalChatResponse chat(GlobalChatRequest request) {
         try {
-            List<LlmRequest.Message> messages = new ArrayList<>();
-            messages.add(new LlmRequest.Message("system", SYSTEM_PROMPT));
-            messages.addAll(buildContextMessages(request.getUserId(), request, config, conversationId));
-            messages.add(new LlmRequest.Message("user", request.getMessage()));
-
-            LlmRequest llmReq = new LlmRequest();
-            llmReq.setModel(model);
-            llmReq.setMessages(messages);
-            llmReq.setTemperature(Double.parseDouble(config.getOrDefault("temperature", "0.7")));
-            llmReq.setMaxTokens(Integer.parseInt(config.getOrDefault("max_tokens", "2048")));
-
-            String result = llmClient.chat(baseUrl, apiKey, llmReq).getContent();
-
+            ChatContext ctx = prepareChat(request);
+            String result = llmClient.chat(ctx.baseUrl, ctx.apiKey, ctx.llmRequest).getContent();
             GlobalChatResponse response = parseResponse(result);
-            response.setConversationId(conversationId);
-
-            // Execute server-side actions and append results
+            response.setConversationId(ctx.conversationId);
             String actionResult = executeServerAction(response.getAction(), request.getUserId());
-            if (actionResult != null) {
-                response.setReply(response.getReply() + "\n\n" + actionResult);
-            }
-
-            saveMessage(conversationId, "assistant", response.getReply(), null);
-            updateConversationCount(conversationId);
-
-            if (response.getReply() != null && !response.getReply().isBlank()) {
-                evolutionService.extractInsightFromConversation(conversationId,
-                    List.of(request.getMessage(), response.getReply()));
-                evolutionService.indexKnowledgeCards(conversationId, request.getMessage(), response.getReply());
-            }
-
+            if (actionResult != null) response.setReply(response.getReply() + "\n\n" + actionResult);
+            afterChat(ctx.conversationId, request.getMessage(), response.getReply());
             return response;
-
         } catch (Exception e) {
             log.error("AI对话失败", e);
-
             GlobalChatResponse fallback = new GlobalChatResponse();
-            fallback.setConversationId(conversationId);
+            fallback.setConversationId(request.getConversationId());
             fallback.setReply("抱歉，我暂时无法回答。请检查 API Key 是否已配置。");
             fallback.setSuggestions(List.of("配置 API Key", "换个方式描述问题"));
             return fallback;
@@ -297,49 +305,17 @@ public class AssistantService {
 
     // 流式 SSE 聊天，逐步返回 AI 回复
     public SseEmitter chatStream(GlobalChatRequest request) {
-        Map<String, String> config = loadConfig();
+        ChatContext ctx = prepareChat(request);
         SseEmitter emitter = new SseEmitter(120000L);
-
-        String conversationId = request.getConversationId();
-        if (conversationId == null || conversationId.isBlank()) {
-            conversationId = UUID.randomUUID().toString();
-            createConversation(conversationId, request.getUserId(), request.getMessage());
-        }
-
-        saveMessage(conversationId, "user", request.getMessage(), null);
-
-        String apiKey = config.getOrDefault("api_key", "");
-        String baseUrl = config.getOrDefault("base_url", "");
-        String model = config.getOrDefault("model", "deepseek-chat");
-        List<LlmRequest.Message> ctxMessages = buildContextMessages(request.getUserId(), request, config, conversationId);
-        String userMsg = request.getMessage();
-
         StringBuilder fullContent = new StringBuilder();
-        final String convId = conversationId;
-
         CompletableFuture.runAsync(() -> {
             try {
-                List<LlmRequest.Message> messages = new ArrayList<>();
-                messages.add(new LlmRequest.Message("system", SYSTEM_PROMPT));
-                messages.addAll(ctxMessages);
-                messages.add(new LlmRequest.Message("user", userMsg));
-
-                LlmRequest llmReq = new LlmRequest();
-                llmReq.setModel(model);
-                llmReq.setMessages(messages);
-                llmReq.setTemperature(Double.parseDouble(config.getOrDefault("temperature", "0.7")));
-                llmReq.setMaxTokens(Integer.parseInt(config.getOrDefault("max_tokens", "2048")));
-
-                llmClient.chatStream(apiKey, baseUrl, model, llmReq,
+                llmClient.chatStream(ctx.apiKey, ctx.baseUrl, ctx.model, ctx.llmRequest,
                     chunk -> {
                         fullContent.append(chunk);
                         try {
-                            emitter.send(SseEmitter.event()
-                                .name("chunk")
-                                .data(chunk));
-                        } catch (Exception e) {
-                            // client disconnected
-                        }
+                            emitter.send(SseEmitter.event().name("chunk").data(chunk));
+                        } catch (Exception e) { /* client disconnected */ }
                     },
                     thinking -> {
                         try {
@@ -354,8 +330,8 @@ public class AssistantService {
                         try {
                             String fullReply = fullContent.toString();
                             // Save the assistant message
-                            saveMessage(convId, "assistant", fullReply, null);
-                            updateConversationCount(convId);
+                            saveMessage(ctx.conversationId, "assistant", fullReply, null);
+                            updateConversationCount(ctx.conversationId);
 
                             // Try to parse action/suggestions from the full response
                             GlobalChatResponse parsed = parseResponse(fullReply);
@@ -368,7 +344,7 @@ public class AssistantService {
 
                             // Send final metadata event
                             java.util.Map<String, Object> meta = new java.util.HashMap<>();
-                            meta.put("conversationId", convId);
+                            meta.put("conversationId", ctx.conversationId);
                             meta.put("suggestions", parsed.getSuggestions() != null ? parsed.getSuggestions() : new java.util.ArrayList<>());
                             meta.put("action", parsed.getAction());
                             meta.put("silent", parsed.isSilent());
@@ -416,9 +392,9 @@ public class AssistantService {
                             emitter.complete();
 
                             if (fullReply != null && !fullReply.isBlank()) {
-                                evolutionService.extractInsightFromConversation(convId,
+                                evolutionService.extractInsightFromConversation(ctx.conversationId,
                                     List.of(request.getMessage(), fullReply));
-                                evolutionService.indexKnowledgeCards(convId, request.getMessage(), fullReply);
+                                evolutionService.indexKnowledgeCards(ctx.conversationId, request.getMessage(), fullReply);
                             }
                         } catch (Exception e) {
                             log.warn("流式完成处理异常", e);
@@ -687,14 +663,7 @@ public class AssistantService {
         }
 
         try {
-            String jsonStr = result.trim();
-            if (jsonStr.startsWith("```")) {
-                int start = jsonStr.indexOf('\n');
-                int end = jsonStr.lastIndexOf("```");
-                if (start > 0 && end > start) {
-                    jsonStr = jsonStr.substring(start, end).trim();
-                }
-            }
+            String jsonStr = com.cortex.util.JsonUtils.cleanJson(result);
 
             com.alibaba.fastjson2.JSONObject json = JSON.parseObject(jsonStr);
             response.setReply(json.getString("reply"));
@@ -832,194 +801,12 @@ public class AssistantService {
 
     // ========== P0: AI action dispatch ==========
 
-    /** Dispatch and execute server-side actions from AI response */
+    /** 统一动作分发：全部委托给 PlatformFeatureService */
     private String executeServerAction(Map<String, Object> action, String userId) {
         if (action == null) return null;
         String type = (String) action.get("type");
         if (type == null) return null;
-        Object payload = action.get("payload");
-
-        try {
-            return switch (type) {
-                // ---- Question bank ----
-                case "searchQuestions" -> execSearchQuestions(payload != null ? payload.toString() : "", userId);
-                case "getQuestion" -> execGetQuestion(toLong(payload), userId);
-                case "generateQuestion" -> execGenerateQuestion(payload != null ? payload.toString() : "");
-                case "createQuestion" -> execCreateQuestion(mapPayload(payload));
-                case "deleteQuestion" -> execDeleteQuestion(toLong(payload));
-                case "toggleQuestionMastered" -> execToggleQuestionMastered(mapPayload(payload), userId);
-                case "getReviewList" -> execGetReviewList(userId);
-                case "submitReview" -> execSubmitReview(mapPayload(payload), userId);
-                // ---- Knowledge tree ----
-                case "getKnowledgeTree" -> execGetKnowledgeTree();
-                case "generateScenario" -> execGenerateScenario(payload != null ? payload.toString() : "");
-                case "toggleNodeMastered" -> execToggleNodeMastered(mapPayload(payload), userId);
-                // ---- Knowledge cards ----
-                case "listCards" -> execListCards();
-                case "generateCard" -> execGenerateCard(toLong(payload));
-                case "deleteCard" -> execDeleteCard(toLong(payload));
-                default -> null;
-            };
-        } catch (Exception e) {
-            log.warn("执行AI操作[{}]失败: {}", type, e.getMessage());
-            return "操作失败: " + e.getMessage();
-        }
-    }
-
-    // ---- Question Bank Handlers ----
-
-    private String execSearchQuestions(String keyword, String userId) {
-        List<QuestionDto> results = questionBankService.searchQuestions(keyword);
-        if (results.isEmpty()) return "未找到相关题目。";
-        StringBuilder sb = new StringBuilder("**搜索结果**（共" + results.size() + "条）：\n");
-        for (int i = 0; i < Math.min(results.size(), 15); i++) {
-            QuestionDto q = results.get(i);
-            sb.append((i + 1) + ". ID:" + q.getId() + " **" + q.getTitle() + "**");
-            if (q.getDifficulty() != null && q.getDifficulty() > 0) sb.append(" " + "★".repeat(q.getDifficulty()));
-            if (q.getCategory() != null) sb.append(" [" + q.getCategory() + "]");
-            sb.append("\n");
-        }
-        return sb.toString();
-    }
-
-    private String execGetQuestion(Long id, String userId) {
-        if (id == null) return "题目ID不能为空。";
-        QuestionDto q = questionBankService.getById(id, userId);
-        if (q == null) return "题目不存在（ID=" + id + "）。";
-        StringBuilder sb = new StringBuilder();
-        sb.append("**题目：" + q.getTitle() + "**\n");
-        if (q.getDescription() != null) sb.append("> " + q.getDescription() + "\n\n");
-        if (q.getTrapCode() != null) {
-            sb.append("```java\n" + q.getTrapCode() + "\n```\n");
-        }
-        if (q.getExpectedPitfall() != null) sb.append("**陷阱：**" + q.getExpectedPitfall() + "\n");
-        if (q.getCorrectExplanation() != null) sb.append("**解释：**" + q.getCorrectExplanation() + "\n");
-        if (q.getHints() != null && !"[]".equals(q.getHints())) sb.append("**提示：**" + q.getHints() + "\n");
-        return sb.toString();
-    }
-
-    private String execGenerateQuestion(String topic) {
-        if (topic == null || topic.isBlank()) return "请提供知识点或主题。";
-        QuestionDto q = questionBankService.generateFromQuestion(topic);
-        return "**已生成题目：【" + q.getTitle() + "】**\n" + q.getDescription() + "\n```java\n" + q.getTrapCode() + "\n```\n告诉我是否要载入编辑器练习。";
-    }
-
-    @SuppressWarnings("unchecked")
-    private String execCreateQuestion(Map<String, Object> payload) {
-        if (payload == null) return "缺少题目数据。";
-        String title = (String) payload.get("title");
-        String trapCode = (String) payload.get("trapCode");
-        String pitfall = (String) payload.get("expectedPitfall");
-        String explanation = (String) payload.get("correctExplanation");
-        if (title == null || title.isBlank()) return "题目标题不能为空。";
-        QuestionDto q = questionBankService.importQuestion(title, null, trapCode, pitfall, explanation);
-        return "**题目已创建**（ID=" + q.getId() + "）：" + q.getTitle();
-    }
-
-    private String execDeleteQuestion(Long id) {
-        if (id == null) return "题目ID不能为空。";
-        questionBankService.deleteQuestion(id);
-        return "已删除题目（ID=" + id + "）。";
-    }
-
-    @SuppressWarnings("unchecked")
-    private String execToggleQuestionMastered(Map<String, Object> payload, String userId) {
-        if (payload == null || userId == null) return "缺少参数。";
-        Long questionId = toLong(payload.get("questionId"));
-        boolean mastered = Boolean.TRUE.equals(payload.get("mastered"));
-        if (questionId == null) return "questionId不能为空。";
-        questionBankService.setMastered(questionId, userId, mastered);
-        return mastered ? "已标记为掌握。" : "已取消掌握标记。";
-    }
-
-    private String execGetReviewList(String userId) {
-        if (userId == null) return "请先登录。";
-        List<QuestionDto> list = questionBankService.getReviewList(userId);
-        if (list.isEmpty()) return "暂无待复习题目。";
-        StringBuilder sb = new StringBuilder("**待复习题目**（共" + list.size() + "道）：\n");
-        for (QuestionDto q : list) {
-            sb.append("- ID:" + q.getId() + " " + q.getTitle());
-            if (q.getNextReviewTime() != null) sb.append("（逾期）");
-            sb.append("\n");
-        }
-        return sb.toString();
-    }
-
-    @SuppressWarnings("unchecked")
-    private String execSubmitReview(Map<String, Object> payload, String userId) {
-        if (payload == null || userId == null) return "缺少参数。";
-        Long questionId = toLong(payload.get("questionId"));
-        boolean stillMastered = Boolean.TRUE.equals(payload.get("stillMastered"));
-        if (questionId == null) return "questionId不能为空。";
-        questionBankService.updateReview(questionId, userId, stillMastered);
-        return stillMastered ? "复习完成，已安排下次复习时间。" : "已取消掌握，将加入复习队列。";
-    }
-
-    // ---- Knowledge Tree Handlers ----
-
-    private String execGetKnowledgeTree() {
-        var tree = knowledgeTreeService.getTree();
-        StringBuilder sb = new StringBuilder("**Java后端知识树**\n");
-        for (var category : tree) {
-            sb.append("- ").append(category.getName()).append("\n");
-            if (category.getChildren() != null) {
-                for (var child : category.getChildren()) {
-                    sb.append("  - ").append(child.getName());
-                    if (child.isLeaf()) sb.append("（可生成题目）");
-                    sb.append("  `").append(child.getId()).append("`\n");
-                }
-            }
-        }
-        return sb.toString();
-    }
-
-    private String execGenerateScenario(String nodeId) {
-        if (nodeId == null || nodeId.isBlank()) return "节点ID不能为空。";
-        ScenarioDto scenario = knowledgeTreeService.generateForNode(nodeId);
-        return "**已生成场景：" + scenario.getKnowledgePoint() + "**\n```java\n" + scenario.getTrapCode() + "\n```\n告诉我是否要载入编辑器练习。";
-    }
-
-    @SuppressWarnings("unchecked")
-    private String execToggleNodeMastered(Map<String, Object> payload, String userId) {
-        if (payload == null || userId == null) return "缺少参数。";
-        String nodeId = (String) payload.get("nodeId");
-        boolean mastered = Boolean.TRUE.equals(payload.get("mastered"));
-        if (nodeId == null) return "nodeId不能为空。";
-        knowledgeTreeService.toggleMastered(nodeId, userId, mastered);
-        return mastered ? "已标记该节点为掌握。" : "已取消掌握标记。";
-    }
-
-    // ---- Knowledge Card Handlers ----
-
-    private String execListCards() {
-        List<CardDto> cards = knowledgeCardService.listAll();
-        if (cards.isEmpty()) return "暂无知识卡片。";
-        StringBuilder sb = new StringBuilder("**知识卡片列表**（共" + cards.size() + "张）：\n");
-        for (int i = 0; i < Math.min(cards.size(), 20); i++) {
-            CardDto c = cards.get(i);
-            sb.append((i + 1) + ". " + (c.getTitle() != null ? c.getTitle() : "未命名"));
-            if (c.getQuestionTitle() != null) sb.append("（题目：" + c.getQuestionTitle() + "）");
-            sb.append("\n");
-        }
-        return sb.toString();
-    }
-
-    private String execGenerateCard(Long questionId) {
-        if (questionId == null) return "题目ID不能为空。";
-        CardDto card = knowledgeCardService.generateCard(questionId);
-        StringBuilder sb = new StringBuilder();
-        sb.append("**已生成知识卡片：【" + (card.getTitle() != null ? card.getTitle() : "未命名") + "】**\n");
-        if (card.getKeyPoints() != null) sb.append("**要点：**" + card.getKeyPoints() + "\n");
-        if (card.getDetailExplanation() != null) sb.append("**详解：**" + card.getDetailExplanation() + "\n");
-        if (card.getCodeSnippet() != null) sb.append("```java\n" + card.getCodeSnippet() + "\n```\n");
-        if (card.getCommonPitfalls() != null) sb.append("**常见误区：**" + card.getCommonPitfalls() + "\n");
-        return sb.toString();
-    }
-
-    private String execDeleteCard(Long id) {
-        if (id == null) return "卡片ID不能为空。";
-        knowledgeCardService.deleteCard(id);
-        return "已删除卡片（ID=" + id + "）。";
+        return platformFeatureService.executeAction(type, action.get("payload"), userId);
     }
 
     // ---- Helpers ----
