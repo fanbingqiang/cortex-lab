@@ -18,3 +18,4 @@ data/
 
 # frontend build output
 src/main/resources/static/lab/
+lab-frontend/node_modules/

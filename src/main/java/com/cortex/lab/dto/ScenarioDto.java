@@ -18,4 +18,6 @@ public class ScenarioDto {
     private String correctExplanation;
     private List<String> hints;
     private Integer difficulty;
+    private String type; // null=trap, "project", "concept", "command", "algorithm"
+    private String generatedContent; // for non-trap types: full generated text
 }

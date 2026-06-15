@@ -31,14 +31,12 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 @Service
 @RequiredArgsConstructor
 public class AssistantService {
-    // 全局 AI 助手服务：支持对话、代码操作、RAG 检索、自我进化
+    // 全局 AI 助手服务：支持对话、代码操作、题库搜索、知识树
 
     private final AssistantConfigMapper configMapper;
     private final AssistantConversationMapper conversationMapper;
     private final AssistantMessageMapper messageMapper;
     private final LlmClient llmClient;
-    private final RagService ragService;
-    private final EvolutionService evolutionService;
     private final QuestionBankMapper questionBankMapper;
     private final UserMapper userLearningProfileMapper;
     private final MistakeRecordMapper mistakeRecordMapper;
@@ -57,49 +55,36 @@ public class AssistantService {
 - 简洁有针对性，不要啰嗦
 - 需要操作时在 action 字段指定；不需要时 action 设为 null
 - 用户想打开题目、运行代码等，直接执行不要问"要不要"
+- 用户说"继续训练""复习""练题"等 → 先 callFeature("getReviewList") 获取待复习/错题 → 再 loadQuestion 加载到黑板引导练习
+- 用户要做题时 → getKnowledgeTree 获取知识树 → generateScenario 从知识树生成题目加载到黑板
+- **严禁凭空生成题目**
 
 ## 可用操作
 - {"type":"switchTab","payload":"practice|questions|cards|community|progress"} — 切换标签
 - {"type":"loadToEditor","payload":"代码文本"} — 将代码文本加载到编辑器
-- {"type":"loadQuestion","payload":题目ID} — 从题库加载题目代码到编辑器
+- {"type":"loadQuestion","payload":题目ID} — 从题库加载题目到编辑器黑板
 - {"type":"runCode"} — 运行编辑器中的代码
 - {"type":"resetCode"} — 重置编辑器代码
-- {"type":"executeCode","payload":"完整的Java代码（含public class和main方法）"} — 编译并执行Java代码，返回真实输出。当你需要确认代码输出、验证想法时用这个
+- {"type":"executeCode","payload":"完整的Java代码（含public class和main方法）"} — 编译并执行Java代码
 
 ## 代码修改操作
 用户可以要求你直接修改编辑器中的代码。修改前先解释要改什么、为什么改，
 然后在 action 中返回修改操作。如果修改涉及多处，一次只改一处。
 
-1. modifyCode — 修改指定范围的代码
-   先解释修改内容，再用以下格式：
-   {"type":"modifyCode","payload":{"startLine":行号,"startCol":列号,"endLine":行号,"endCol":列号,"newText":"替换后的代码"}}
-   注意：行号从1开始，列号从1开始
+1. modifyCode — 修改指定范围代码，payload: {"startLine":行号,"startCol":列号,"endLine":行号,"endCol":列号,"newText":"替换代码"}
+2. insertCode — 插入代码，payload: {"line":行号,"col":列号,"text":"要插入的代码"}
+3. deleteCode — 移除代码，payload: {"startLine":行号,"startCol":列号,"endLine":行号,"endCol":列号}
 
-2. insertCode — 在指定位置插入代码
-   {"type":"insertCode","payload":{"line":行号,"col":列号,"text":"要插入的代码"}}
-
-3. deleteCode — 移除指定范围的代码
-   {"type":"deleteCode","payload":{"startLine":行号,"startCol":列号,"endLine":行号,"endCol":列号}}
-
-## 题库操作
-- {"type":"searchQuestions","payload":"关键词"} — 搜索题目，返回标题和ID
-- {"type":"getQuestion","payload":题目ID} — 查看题目详情（含代码）
-- {"type":"generateQuestion","payload":"知识点"} — AI生成一道新陷阱题
-- {"type":"createQuestion","payload":{"title":"标题","trapCode":"代码","expectedPitfall":"坑点","correctExplanation":"原理解释"}} — 手动创建题目
-- {"type":"deleteQuestion","payload":题目ID} — 删除题目
-- {"type":"toggleQuestionMastered","payload":{"questionId":ID,"mastered":true}} — 标记掌握/未掌握
-- {"type":"getReviewList"} — 查看待复习题目
-- {"type":"submitReview","payload":{"questionId":ID,"stillMastered":true}} — 提交复习结果
-
-## 知识树操作
-- {"type":"getKnowledgeTree"} — 获取知识树结构
-- {"type":"generateScenario","payload":"节点ID"} — 从知识点生成陷阱题场景（会加载到编辑器）
-- {"type":"toggleNodeMastered","payload":{"nodeId":"节点ID","mastered":true}} — 切换节点掌握状态
+## 题目操作
+- {"type":"getKnowledgeTree"} — 获取知识树结构，查看所有知识点
+- {"type":"generateScenario","payload":"节点ID"} — 从知识树节点生成陷阱代码加载到黑板
+- {"type":"loadQuestion","payload":题目ID} — 从题库加载已有题目到黑板
+- {"type":"callFeature","payload":{"feature":"getReviewList","params":{}}} — 获取待复习/错题列表
+- {"type":"callFeature","payload":{"feature":"searchQuestions","params":{"keyword":"关键词"}}} — 搜索已有题目
 
 ## 知识卡片操作
 - {"type":"listCards"} — 列出所有知识卡片
 - {"type":"generateCard","payload":题目ID} — 为题目生成知识卡片
-- {"type":"deleteCard","payload":卡片ID} — 删除知识卡片
 
 ## 平台功能调用
 当用户提到学习报告、社区陷阱、讨论、导师自评等平台功能时，
@@ -107,23 +92,19 @@ public class AssistantService {
 {"type":"callFeature","payload":{"feature":"功能名","params":参数}}
 功能列表见下方【平台功能】。
 
-## 输出格式（严格JSON）
+## 输出格式
+以 JSON 格式返回。reply 中的内容就是显示给用户的对话文本，不要包含 JSON 结构字符。
 {
-  "reply": "你的回答（执行操作时不超过10字或空字符串）",
+  "reply": "你的回答",
   "action": {"type": "操作名", "payload": 参数},
   "silent": true,
   "suggestions": ["建议1", "建议2", "建议3"]
 }
+**重要：reply 只放自然对话文本，不要出现 JSON 标记或引号字符。**
 
-重要：
-- 当返回 action 时，如果不需要回复用户，设 silent=true，reply 可为空字符串。前端会静默执行action，不显示在聊天框。
-- 当执行 switchTab、loadQuestion 等导航操作时，尽量 silent=true，避免多余文字。
-- 根据用户当前状态主动执行有益操作，例如：
-  * 用户打开页面时 → 主动告知待复习题数（suggestions）
-  * 用户代码运行出错 → 主动分析错误并修正代码
-  * 用户查看题目时 → 主动告知是否已掌握
-- suggestions必须根据用户当前状态生成3个具体的、可点击的建议，不要用"换个问题"这种通用建议。
-    例如用户HashMap相关错误多，应该建议"生成HashMap陷阱题"、"看看ConcurrentHashMap区别"。
+注意：
+- 当返回 action 时，如果不需要回复用户，设 silent=true，reply 可短或为空。
+- 用户想看题目、运行代码等，直接用 action 执行，reply 简短引导即可。
 """;
 
     private String buildSystemPrompt() {
@@ -222,21 +203,10 @@ public class AssistantService {
         if (profile != null && !profile.isBlank() && !profile.equals("（用户未登录）") && !profile.equals("（暂无学习数据）")) {
             msgs.add(new LlmRequest.Message("user", "【用户画像】\n" + profile));
         }
-        String questions = buildQuestionList();
-        if (questions != null && !questions.isBlank() && !questions.equals("（暂无题目）")) {
-            msgs.add(new LlmRequest.Message("user", "【题库列表】\n" + questions));
-        }
+        // 不传题库列表，题目只从知识树获取
         String code = buildCodeContext(request);
         if (code != null && !code.isBlank()) {
             msgs.add(new LlmRequest.Message("user", "【当前代码】\n" + code));
-        }
-        String rag = buildRagContext(request.getMessage(), config);
-        if (rag != null && !rag.isBlank() && !rag.contains("未检索到") && !rag.contains("已禁用")) {
-            msgs.add(new LlmRequest.Message("user", "【相关知识】\n" + rag));
-        }
-        String evolution = buildEvolutionContext(config);
-        if (evolution != null && !evolution.isBlank() && !evolution.contains("已禁用")) {
-            msgs.add(new LlmRequest.Message("user", "【进化知识库】\n" + evolution));
         }
         String history = buildHistory(conversationId, config);
         if (history != null && !history.isBlank() && !history.contains("无历史")) {
@@ -273,13 +243,11 @@ public class AssistantService {
         return new ChatContext(config, conversationId, apiKey, baseUrl, model, llmReq);
     }
 
-    /** 对话后处理：保存助手消息、进化学习 */
-    private void afterChat(String conversationId, String userMsg, String reply) {
+    /** 对话后处理：保存助手消息 */
+    private void afterChat(String conversationId, String reply) {
         if (reply == null || reply.isBlank()) return;
         saveMessage(conversationId, "assistant", reply, null);
         updateConversationCount(conversationId);
-        evolutionService.extractInsightFromConversation(conversationId, List.of(userMsg, reply));
-        evolutionService.indexKnowledgeCards(conversationId, userMsg, reply);
     }
 
     // AI 对话：构造上下文、调用 LLM、解析返回
@@ -291,7 +259,7 @@ public class AssistantService {
             response.setConversationId(ctx.conversationId);
             String actionResult = executeServerAction(response.getAction(), request.getUserId());
             if (actionResult != null) response.setReply(response.getReply() + "\n\n" + actionResult);
-            afterChat(ctx.conversationId, request.getMessage(), response.getReply());
+            afterChat(ctx.conversationId, response.getReply());
             return response;
         } catch (Exception e) {
             log.error("AI对话失败", e);
@@ -303,99 +271,80 @@ public class AssistantService {
         }
     }
 
-    // 流式 SSE 聊天，逐步返回 AI 回复
+    // 流式 SSE 聊天：提取 reply 文本推送，不泄露 JSON
     public SseEmitter chatStream(GlobalChatRequest request) {
         ChatContext ctx = prepareChat(request);
         SseEmitter emitter = new SseEmitter(120000L);
         StringBuilder fullContent = new StringBuilder();
+        String[] lastSentReply = {""};
         CompletableFuture.runAsync(() -> {
             try {
                 llmClient.chatStream(ctx.apiKey, ctx.baseUrl, ctx.model, ctx.llmRequest,
                     chunk -> {
                         fullContent.append(chunk);
+                        // 从累积 JSON 中提取 reply，只推送增量部分
                         try {
-                            emitter.send(SseEmitter.event().name("chunk").data(chunk));
-                        } catch (Exception e) { /* client disconnected */ }
+                            String jsonStr = com.cortex.util.JsonUtils.cleanJson(fullContent.toString());
+                            com.alibaba.fastjson2.JSONObject json = JSON.parseObject(jsonStr);
+                            String reply = json.getString("reply");
+                            if (reply != null && reply.length() > lastSentReply[0].length()) {
+                                String newPart = reply.substring(lastSentReply[0].length());
+                                lastSentReply[0] = reply;
+                                try {
+                                    emitter.send(SseEmitter.event().name("chunk").data(newPart));
+                                } catch (Exception ignored) {}
+                            }
+                        } catch (Exception ignored) {}
                     },
                     thinking -> {
                         try {
-                            emitter.send(SseEmitter.event()
-                                .name("thinking")
-                                .data(thinking));
-                        } catch (Exception e) {
-                            // client disconnected
-                        }
+                            emitter.send(SseEmitter.event().name("thinking").data(thinking));
+                        } catch (Exception e) { /* client disconnected */ }
                     },
                     () -> {
                         try {
                             String fullReply = fullContent.toString();
-                            // Save the assistant message
-                            saveMessage(ctx.conversationId, "assistant", fullReply, null);
+                            GlobalChatResponse parsed = parseResponse(fullReply);
+                            String cleanReply = parsed.getReply();
+
+                            // 保存解析后的纯文本，不是原始 JSON
+                            if (cleanReply != null && !cleanReply.isBlank()) {
+                                saveMessage(ctx.conversationId, "assistant", cleanReply, null);
+                            } else {
+                                saveMessage(ctx.conversationId, "assistant", fullReply, null);
+                            }
                             updateConversationCount(ctx.conversationId);
 
-                            // Try to parse action/suggestions from the full response
-                            GlobalChatResponse parsed = parseResponse(fullReply);
-
-                            // If silent=true and has action, remove assistant message from chat display
-                            if (parsed.isSilent() && parsed.getAction() != null) {
-                                // Don't show this message in chat, but still process action below
-                                // The reply will be replaced with empty since it's not visible
-                            }
-
-                            // Send final metadata event
                             java.util.Map<String, Object> meta = new java.util.HashMap<>();
                             meta.put("conversationId", ctx.conversationId);
                             meta.put("suggestions", parsed.getSuggestions() != null ? parsed.getSuggestions() : new java.util.ArrayList<>());
                             meta.put("action", parsed.getAction());
                             meta.put("silent", parsed.isSilent());
 
-                            // Handle executeCode action: actually compile and run
                             if (parsed.getAction() != null && "executeCode".equals(parsed.getAction().get("type"))) {
                                 String code = (String) parsed.getAction().get("payload");
                                 if (code != null && !code.isBlank()) {
                                     String execResult = executeCodeAction(code);
-                                    String updatedReply = parsed.getReply() + "\n\n" + execResult;
-                                    parsed.setReply(updatedReply);
                                     try {
-                                        emitter.send(SseEmitter.event()
-                                            .name("chunk")
-                                            .data("\n\n" + execResult));
-                                    } catch (Exception e) {
-                                        log.warn("发送执行结果失败", e);
-                                    }
+                                        emitter.send(SseEmitter.event().name("chunk").data("\n\n" + execResult));
+                                    } catch (Exception e) { log.warn("发送执行结果失败", e); }
                                 }
                             }
 
-                            // Handle other server-side actions
                             if (parsed.getAction() != null) {
                                 String actionType = (String) parsed.getAction().get("type");
                                 if (!"executeCode".equals(actionType)) {
                                     String actionResult = executeServerAction(parsed.getAction(), request.getUserId());
                                     if (actionResult != null) {
-                                        String updatedReply = parsed.getReply() + "\n\n" + actionResult;
-                                        parsed.setReply(updatedReply);
                                         try {
-                                            emitter.send(SseEmitter.event()
-                                                .name("chunk")
-                                                .data("\n\n" + actionResult));
-                                        } catch (Exception e) {
-                                            log.warn("发送操作结果失败", e);
-                                        }
+                                            emitter.send(SseEmitter.event().name("chunk").data("\n\n" + actionResult));
+                                        } catch (Exception e) { log.warn("发送操作结果失败", e); }
                                     }
                                 }
                             }
 
-                            emitter.send(SseEmitter.event()
-                                .name("metadata")
-                                .data(JSON.toJSONString(meta)));
-
+                            emitter.send(SseEmitter.event().name("metadata").data(JSON.toJSONString(meta)));
                             emitter.complete();
-
-                            if (fullReply != null && !fullReply.isBlank()) {
-                                evolutionService.extractInsightFromConversation(ctx.conversationId,
-                                    List.of(request.getMessage(), fullReply));
-                                evolutionService.indexKnowledgeCards(ctx.conversationId, request.getMessage(), fullReply);
-                            }
                         } catch (Exception e) {
                             log.warn("流式完成处理异常", e);
                             emitter.complete();
@@ -403,32 +352,20 @@ public class AssistantService {
                     },
                     error -> {
                         try {
-                            emitter.send(SseEmitter.event()
-                                .name("error")
-                                .data(error.getMessage()));
-                        } catch (Exception e2) {
-                            // ignore
-                        }
+                            emitter.send(SseEmitter.event().name("error").data(error.getMessage()));
+                        } catch (Exception e2) { /* ignore */ }
                         emitter.completeWithError(error);
                     }
                 );
             } catch (Exception e) {
                 log.error("流式AI对话失败", e);
                 try {
-                    emitter.send(SseEmitter.event()
-                        .name("error")
-                        .data("AI对话失败: " + e.getMessage()));
+                    emitter.send(SseEmitter.event().name("error").data("AI对话失败: " + e.getMessage()));
                 } catch (Exception e2) {}
                 emitter.completeWithError(e);
             }
         });
-
         return emitter;
-    }
-
-    // 提交对话反馈，用于自我进化
-    public void submitFeedback(String conversationId, Long messageId, String userId, int rating, String comment) {
-        evolutionService.recordFeedback(conversationId, messageId, userId, rating, comment);
     }
 
     // 加载助手配置（api_key, model, temperature 等）
@@ -446,9 +383,7 @@ public class AssistantService {
             config.put("model", "deepseek-chat");
             config.put("base_url", "https://api.deepseek.com");
             config.put("system_prompt", "你是一个智能编程导师");
-            config.put("rag_enabled", "true");
             config.put("history_enabled", "true");
-            config.put("evolution_enabled", "true");
             config.put("max_history_length", "20");
         }
         if (!config.containsKey("temperature")) config.put("temperature", "0.7");
@@ -589,30 +524,6 @@ public class AssistantService {
             sb.append("用户上次运行的输出：\n```\n").append(execOut).append("\n```\n");
         }
         return sb.toString();
-    }
-
-    private String buildRagContext(String message, Map<String, String> config) {
-        if (!"true".equals(config.getOrDefault("rag_enabled", "true"))) {
-            return "（RAG已禁用）";
-        }
-
-        try {
-            List<String> contexts = ragService.searchRelevantContext(message, 5);
-            if (contexts.isEmpty()) {
-                return "（未检索到相关知识）";
-            }
-            return String.join("\n---\n", contexts);
-        } catch (Exception e) {
-            log.warn("RAG检索失败: {}", e.getMessage());
-            return "（RAG检索失败）";
-        }
-    }
-
-    private String buildEvolutionContext(Map<String, String> config) {
-        if (!"true".equals(config.getOrDefault("evolution_enabled", "true"))) {
-            return "（自我进化已禁用）";
-        }
-        return evolutionService.buildEvolutionContext();
     }
 
     private String buildHistory(String conversationId, Map<String, String> config) {

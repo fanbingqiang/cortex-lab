@@ -1,0 +1,14 @@
+target/
+!target/*.jar
+.idea/
+*.iml
+.git/
+.gitignore
+*.md
+data/
+*.bat
+*.md
+init-mysql.sql
+lab-frontend/node_modules/
+Dockerfile
+docker-compose.yml

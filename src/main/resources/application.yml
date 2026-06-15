@@ -9,12 +9,13 @@ server:
 spring:
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://${MYSQL_HOST:localhost}:3306/cortex2?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&useUnicode=true&characterEncoding=UTF-8&connectionCollation=utf8mb4_unicode_ci&characterSetResults=UTF-8&sessionVariables=character_set_client=utf8mb4,character_set_connection=utf8mb4,character_set_results=utf8mb4
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:3306/cortex2?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&useUnicode=yes&characterEncoding=UTF-8&connectionCollation=utf8mb4_unicode_ci
     username: ${MYSQL_USER:root}
-    password: ${MYSQL_PASSWORD:asdfghjkl123}
+    password: ${MYSQL_PASSWORD}
     hikari:
       maximum-pool-size: 10
       minimum-idle: 5
+      connection-init-sql: "SET NAMES utf8mb4"
   sql:
     init:
       mode: never

@@ -580,23 +580,6 @@ public class LabController {
         return assistantService.chatStream(request);
     }
 
-    @PostMapping("/assistant/feedback")
-    public ApiResponse<Void> submitFeedback(@RequestBody Map<String, Object> body) {
-        // 提交对话反馈
-        try {
-            String conversationId = (String) body.get("conversationId");
-            Long messageId = body.get("messageId") != null ? Long.valueOf(body.get("messageId").toString()) : null;
-            String userId = (String) body.getOrDefault("userId", "anonymous");
-            int rating = Integer.parseInt(body.get("rating").toString());
-            String comment = (String) body.get("comment");
-            assistantService.submitFeedback(conversationId, messageId, userId, rating, comment);
-            return ApiResponse.success(null);
-        } catch (Exception e) {
-            log.error("提交反馈失败", e);
-            return ApiResponse.error(e.getMessage());
-        }
-    }
-
     // ==================== 导师自评 ====================
 
     @PostMapping("/tutor/assess")

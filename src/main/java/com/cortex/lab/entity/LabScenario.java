@@ -23,5 +23,7 @@ public class LabScenario {
     private String correctExplanation;
     private String hints;
     private Integer difficulty;
+    private String type; // null=trap, "concept", "command", "algorithm"
+    private String generatedContent; // for non-trap types: full generated text
     private LocalDateTime gmtCreate;
 }
