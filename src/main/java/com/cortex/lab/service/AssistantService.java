@@ -13,6 +13,7 @@ import com.cortex.llm.LlmClient;
 import com.cortex.llm.LlmRequest;
 import com.cortex.entity.MistakeRecord;
 import com.cortex.mapper.MistakeRecordMapper;
+import com.cortex.config.LlmConfigResolver;
 import com.cortex.lab.service.KnowledgeTreeService;
 import com.cortex.lab.service.SandboxService;
 import com.cortex.lab.dto.ExecuteResponse;
@@ -45,6 +46,7 @@ public class AssistantService {
     private final QuestionBankService questionBankService;
     private final KnowledgeCardService knowledgeCardService;
     private final PlatformFeatureService platformFeatureService;
+    private final LlmConfigResolver llmConfigResolver;
 
     private static final String BASE_SYSTEM_PROMPT = """
 你是一个智能编程导师"小C"，运行在代码练习平台 Cortex Lab 中。
@@ -71,9 +73,9 @@ public class AssistantService {
 用户可以要求你直接修改编辑器中的代码。修改前先解释要改什么、为什么改，
 然后在 action 中返回修改操作。如果修改涉及多处，一次只改一处。
 
-1. modifyCode — 修改指定范围代码，payload: {"startLine":行号,"startCol":列号,"endLine":行号,"endCol":列号,"newText":"替换代码"}
-2. insertCode — 插入代码，payload: {"line":行号,"col":列号,"text":"要插入的代码"}
-3. deleteCode — 移除代码，payload: {"startLine":行号,"startCol":列号,"endLine":行号,"endCol":列号}
+1. modifyCode — 替换代码片段，payload: {"target":"要被替换的精确代码","replacement":"新代码"}
+2. insertCode — 在末尾追加代码，payload: "要追加的代码文本"
+3. deleteCode — 删除代码片段，payload: "要删除的精确代码文本"
 
 ## 题目操作
 - {"type":"getKnowledgeTree"} — 获取知识树结构，查看所有知识点
@@ -92,6 +94,12 @@ public class AssistantService {
 {"type":"callFeature","payload":{"feature":"功能名","params":参数}}
 功能列表见下方【平台功能】。
 
+## 最重要的规则
+1. **用户问了问题，必须在 reply 里用自然语言直接回答**，不能为空、不能只给 action。
+2. silent=true 仅在你执行了 loadToEditor/runCode 等纯操作且无需文字说明时使用。
+3. 禁止只返回 action 而不回答问题。先回答，再决定是否附带 action。
+4. 若 API 调用失败或不确定，也要在 reply 里说明原因并给出建议。
+
 ## 输出格式
 以 JSON 格式返回。reply 中的内容就是显示给用户的对话文本，不要包含 JSON 结构字符。
 {
@@ -100,11 +108,12 @@ public class AssistantService {
   "silent": true,
   "suggestions": ["建议1", "建议2", "建议3"]
 }
-**重要：reply 只放自然对话文本，不要出现 JSON 标记或引号字符。**
+**重要：reply 只放自然对话文本，不要出现 JSON 标记或引号字符。
+- 如果 action.payload 中包含代码，代码中的双引号必须用 \" 转义，例如 System.out.println(\"hello\")。**
 
 注意：
-- 当返回 action 时，如果不需要回复用户，设 silent=true，reply 可短或为空。
-- 用户想看题目、运行代码等，直接用 action 执行，reply 简短引导即可。
+- 当返回 action 时，reply 仍应包含对用户的简要说明，除非 silent=true。
+- 用户想看题目、运行代码等，用 action 执行，同时 reply 说明你在做什么。
 """;
 
     private String buildSystemPrompt() {
@@ -229,8 +238,11 @@ public class AssistantService {
         }
         saveMessage(conversationId, "user", request.getMessage(), null);
         String apiKey = config.getOrDefault("api_key", "");
-        String baseUrl = config.getOrDefault("base_url", "");
+        String baseUrl = config.getOrDefault("base_url", "https://api.deepseek.com");
         String model = config.getOrDefault("model", "deepseek-chat");
+        if (apiKey == null || apiKey.isBlank() || "your-api-key-here".equals(apiKey)) {
+            throw new RuntimeException("请配置有效的 API Key（前端配置面板或环境变量 LLM_API_KEY）");
+        }
         List<LlmRequest.Message> msgs = new ArrayList<>();
         msgs.add(new LlmRequest.Message("system", buildSystemPrompt()));
         msgs.addAll(buildContextMessages(request.getUserId(), request, config, conversationId));
@@ -273,8 +285,28 @@ public class AssistantService {
 
     // 流式 SSE 聊天：提取 reply 文本推送，不泄露 JSON
     public SseEmitter chatStream(GlobalChatRequest request) {
-        ChatContext ctx = prepareChat(request);
         SseEmitter emitter = new SseEmitter(120000L);
+        try {
+            ChatContext ctx = prepareChat(request);
+            startChatStream(ctx, emitter, request);
+        } catch (Exception e) {
+            log.error("流式AI对话初始化失败", e);
+            CompletableFuture.runAsync(() -> {
+                try {
+                    String msg = e.getMessage() != null ? e.getMessage() : "AI 对话失败";
+                    emitter.send(SseEmitter.event().name("chunk").data(msg));
+                    emitter.send(SseEmitter.event().name("metadata").data(
+                        JSON.toJSONString(Map.of("conversationId", request.getConversationId(), "suggestions", List.of("配置 API Key", "换个方式提问")))));
+                    emitter.complete();
+                } catch (Exception ex) {
+                    emitter.completeWithError(ex);
+                }
+            });
+        }
+        return emitter;
+    }
+
+    private void startChatStream(ChatContext ctx, SseEmitter emitter, GlobalChatRequest request) {
         StringBuilder fullContent = new StringBuilder();
         String[] lastSentReply = {""};
         CompletableFuture.runAsync(() -> {
@@ -282,7 +314,6 @@ public class AssistantService {
                 llmClient.chatStream(ctx.apiKey, ctx.baseUrl, ctx.model, ctx.llmRequest,
                     chunk -> {
                         fullContent.append(chunk);
-                        // 从累积 JSON 中提取 reply，只推送增量部分
                         try {
                             String jsonStr = com.cortex.util.JsonUtils.cleanJson(fullContent.toString());
                             com.alibaba.fastjson2.JSONObject json = JSON.parseObject(jsonStr);
@@ -294,7 +325,29 @@ public class AssistantService {
                                     emitter.send(SseEmitter.event().name("chunk").data(newPart));
                                 } catch (Exception ignored) {}
                             }
-                        } catch (Exception ignored) {}
+                        } catch (Exception ignored) {
+                            // JSON 尚未完整：尝试提取 reply 文本或直接流式输出
+                            String accumulated = fullContent.toString().trim();
+                            if (!accumulated.startsWith("{") && !accumulated.isEmpty()) {
+                                // 非 JSON 格式回复，直接流式
+                                try {
+                                    emitter.send(SseEmitter.event().name("chunk").data(chunk));
+                                    lastSentReply[0] = accumulated;
+                                } catch (Exception ignored2) {}
+                            } else {
+                                // JSON 格式回复：尝试提取 reply 文本（部分状态下也能提取）
+                                String extracted = extractReplyText(accumulated);
+                                if (extracted != null && extracted.length() > lastSentReply[0].length()) {
+                                    String newPart = extracted.substring(lastSentReply[0].length());
+                                    lastSentReply[0] = extracted;
+                                    if (!newPart.isEmpty()) {
+                                        try {
+                                            emitter.send(SseEmitter.event().name("chunk").data(newPart));
+                                        } catch (Exception ignored2) {}
+                                    }
+                                }
+                            }
+                        }
                     },
                     thinking -> {
                         try {
@@ -307,6 +360,13 @@ public class AssistantService {
                             GlobalChatResponse parsed = parseResponse(fullReply);
                             String cleanReply = parsed.getReply();
 
+                            // 流式阶段未推送过内容时，一次性补发完整 reply
+                            if (cleanReply != null && !cleanReply.isBlank() && lastSentReply[0].isEmpty()) {
+                                try {
+                                    emitter.send(SseEmitter.event().name("chunk").data(cleanReply));
+                                } catch (Exception e) { log.warn("补发 reply 失败", e); }
+                            }
+
                             // 保存解析后的纯文本，不是原始 JSON
                             if (cleanReply != null && !cleanReply.isBlank()) {
                                 saveMessage(ctx.conversationId, "assistant", cleanReply, null);
@@ -318,7 +378,19 @@ public class AssistantService {
                             java.util.Map<String, Object> meta = new java.util.HashMap<>();
                             meta.put("conversationId", ctx.conversationId);
                             meta.put("suggestions", parsed.getSuggestions() != null ? parsed.getSuggestions() : new java.util.ArrayList<>());
-                            meta.put("action", parsed.getAction());
+
+                            // 如果 AI 没有指定动作但回复中有代码块，自动补 loadToEditor
+                            java.util.Map<String, Object> action = parsed.getAction();
+                            if (action == null) {
+                                String code = extractCodeBlock(cleanReply != null ? cleanReply : "");
+                                if (code != null) {
+                                    java.util.Map<String, Object> autoAction = new java.util.LinkedHashMap<>();
+                                    autoAction.put("type", "loadToEditor");
+                                    autoAction.put("payload", code);
+                                    action = autoAction;
+                                }
+                            }
+                            meta.put("action", action);
                             meta.put("silent", parsed.isSilent());
 
                             if (parsed.getAction() != null && "executeCode".equals(parsed.getAction().get("type"))) {
@@ -352,44 +424,48 @@ public class AssistantService {
                     },
                     error -> {
                         try {
-                            emitter.send(SseEmitter.event().name("error").data(error.getMessage()));
-                        } catch (Exception e2) { /* ignore */ }
-                        emitter.completeWithError(error);
+                            String errMsg = "AI 对话失败: " + error.getMessage();
+                            emitter.send(SseEmitter.event().name("chunk").data(errMsg));
+                            emitter.send(SseEmitter.event().name("metadata").data(
+                                JSON.toJSONString(Map.of("suggestions", List.of("检查 API Key", "重新提问")))));
+                            emitter.complete();
+                        } catch (Exception e2) {
+                            emitter.completeWithError(error);
+                        }
                     }
                 );
             } catch (Exception e) {
                 log.error("流式AI对话失败", e);
                 try {
-                    emitter.send(SseEmitter.event().name("error").data("AI对话失败: " + e.getMessage()));
-                } catch (Exception e2) {}
-                emitter.completeWithError(e);
+                    emitter.send(SseEmitter.event().name("chunk").data("AI 对话失败: " + e.getMessage()));
+                    emitter.complete();
+                } catch (Exception e2) {
+                    emitter.completeWithError(e);
+                }
             }
         });
-        return emitter;
     }
 
     // 加载助手配置（api_key, model, temperature 等）
     public Map<String, String> loadConfig() {
-        Map<String, String> config = new HashMap<>();
+        Map<String, String> config = new HashMap<>(llmConfigResolver.resolve());
         try {
             List<AssistantConfig> list = configMapper.selectList(null);
             for (AssistantConfig c : list) {
-                config.put(c.getConfigKey(), c.getConfigValue());
+                if (c.getConfigValue() != null && !c.getConfigValue().isBlank()) {
+                    config.put(c.getConfigKey(), c.getConfigValue());
+                }
             }
         } catch (Exception e) {
             log.warn("加载配置失败，使用默认值: {}", e.getMessage());
-            config.put("temperature", "0.7");
-            config.put("max_tokens", "2048");
-            config.put("model", "deepseek-chat");
-            config.put("base_url", "https://api.deepseek.com");
-            config.put("system_prompt", "你是一个智能编程导师");
-            config.put("history_enabled", "true");
-            config.put("max_history_length", "20");
         }
         if (!config.containsKey("temperature")) config.put("temperature", "0.7");
         if (!config.containsKey("max_tokens")) config.put("max_tokens", "2048");
         if (!config.containsKey("model")) config.put("model", "deepseek-chat");
         if (!config.containsKey("base_url")) config.put("base_url", "https://api.deepseek.com");
+        if (!config.containsKey("system_prompt")) config.put("system_prompt", "你是一个智能编程导师");
+        if (!config.containsKey("history_enabled")) config.put("history_enabled", "true");
+        if (!config.containsKey("max_history_length")) config.put("max_history_length", "20");
         return config;
     }
 
@@ -591,16 +667,87 @@ public class AssistantService {
                 response.setSuggestions(suggestions != null ? suggestions : new ArrayList<>());
             }
         } catch (Exception e) {
-            log.warn("JSON解析失败，使用纯文本回复: {}", e.getMessage());
-            response.setReply(result);
-            response.setIncomplete(false);
+            log.warn("JSON解析失败，尝试提取回复文本: {}", e.getMessage());
+            String extracted = extractReplyText(result);
+            if (extracted != null && !extracted.isBlank()) {
+                response.setReply(extracted);
+            } else {
+                response.setReply("我还在思考中，请稍等...");
+            }
+            response.setIncomplete(true);
         }
 
         if (response.getReply() == null || response.getReply().isBlank()) {
-            response.setReply(result != null ? result : "（AI未能生成有效回复）");
+            response.setReply("（AI未能生成有效回复）");
         }
 
         return response;
+    }
+
+    /** JSON 解析失败时从原始文本中提取 reply 字段值，避免显示原始 JSON */
+    private String extractReplyText(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        raw = raw.trim();
+        // 先清理 markdown 代码块标记
+        if (raw.startsWith("```")) {
+            int start = raw.indexOf('\n');
+            int end = raw.lastIndexOf("```");
+            if (start > 0 && end > start) {
+                raw = raw.substring(start, end).trim();
+            }
+        }
+        // 查找 "reply":" 后的内容
+        int replyIdx = raw.indexOf("\"reply\"");
+        if (replyIdx < 0) return null;
+        int colonIdx = raw.indexOf(':', replyIdx + 7);
+        if (colonIdx < 0) return null;
+        int quoteStart = raw.indexOf('"', colonIdx + 1);
+        if (quoteStart < 0) return null;
+        // 扫描 reply 字符串值（同时处理转义序列和未转义的内嵌引号）
+        StringBuilder sb = new StringBuilder();
+        boolean escaped = false;
+        for (int i = quoteStart + 1; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            if (escaped) {
+                // 解析 JSON 转义序列
+                switch (c) {
+                    case 'n': sb.append('\n'); break;
+                    case 't': sb.append('\t'); break;
+                    case 'r': break; // 忽略 \r
+                    case '"': sb.append('"'); break;
+                    case '\\': sb.append('\\'); break;
+                    default: sb.append(c); break;
+                }
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else if (c == '"') {
+                // 检查引号后是否是 JSON 分隔符或结尾
+                String after = raw.substring(i + 1).trim();
+                if (after.isEmpty() || after.startsWith(",") || after.startsWith("}") || after.startsWith("]")) {
+                    break; // 字符串结束
+                }
+                // 未转义的内嵌引号，保留为普通字符
+                sb.append(c);
+            } else {
+                sb.append(c);
+            }
+        }
+        String reply = sb.toString().trim();
+        return reply.isEmpty() ? null : reply;
+    }
+
+    /** 从文本中提取第一个代码块（```xxx ... ```），用于自动加载到编辑器 */
+    private String extractCodeBlock(String text) {
+        if (text == null || text.isBlank()) return null;
+        int start = text.indexOf("```");
+        if (start < 0) return null;
+        int afterLang = text.indexOf('\n', start + 3);
+        if (afterLang < 0) return null;
+        int end = text.indexOf("```", afterLang + 1);
+        if (end < 0) return null;
+        String code = text.substring(afterLang + 1, end).trim();
+        return code.isEmpty() ? null : code;
     }
 
     // 软删除对话

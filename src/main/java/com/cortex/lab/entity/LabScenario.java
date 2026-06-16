@@ -16,6 +16,7 @@ import java.time.LocalDateTime;
 public class LabScenario {
     @TableId(type = IdType.AUTO)
     private Long id;
+    private String nodeId;
     private String knowledgePoint;
     private String category;
     private String trapCode;

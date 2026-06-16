@@ -221,6 +221,13 @@ public class CommunityTrapService {
         return toDto(entity);
     }
 
+    // 删除陷阱
+    public void delete(Long id) {
+        CommunityTrap entity = communityTrapMapper.selectById(id);
+        if (entity == null) throw new RuntimeException("陷阱不存在");
+        communityTrapMapper.deleteById(id);
+    }
+
     // 将社区陷阱导入题库
     public QuestionBank integrateIntoQuestionBank(Long id) {
         CommunityTrap entity = communityTrapMapper.selectById(id);
@@ -261,7 +268,7 @@ public class CommunityTrapService {
         qb.setHints(entity.getHints());
         qb.setCategory("社区-" + entity.getCategory());
         qb.setDifficulty(entity.getDifficulty());
-        qb.setStatus("ACTIVE");
+        qb.setStatus("PENDING");
         qb.setGmtCreate(LocalDateTime.now());
         qb.setGmtModified(LocalDateTime.now());
         questionBankMapper.insert(qb);

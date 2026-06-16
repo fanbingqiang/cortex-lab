@@ -36,23 +36,23 @@ const currentSuggestions = ref<string[]>([])
 const welcomeLoaded = ref(false)
 
 onMounted(async () => {
-  if (auth.isLoggedIn) {
-    chatStore.loadConversations(auth.userId)
-    await loadWelcome()
-  }
+  if (auth.isLoggedIn) chatStore.loadConversations(auth.userId)
+  await loadWelcome()
 })
 
 async function loadWelcome() {
   if (welcomeLoaded.value) return
   try {
-    const res = await labApi.get<any>('/assistant/welcome?userId=' + encodeURIComponent(auth.userId))
+    const uid = auth.userId || 'anonymous'
+    const res = await labApi.get<any>('/assistant/welcome?userId=' + encodeURIComponent(uid))
     if (res.code === 200 && res.data) {
       chatMessages.value.push({ role: 'assistant', content: res.data.reply || '' })
       currentSuggestions.value = res.data.suggestions || []
       welcomeLoaded.value = true
     }
   } catch {
-    // ignore
+    chatMessages.value.push({ role: 'assistant', content: '你好！我是小C助手，可以帮你学习 Java 编程。' })
+    welcomeLoaded.value = true
   }
 }
 
@@ -74,11 +74,14 @@ watch(() => sse.metadata.value, (meta: any) => {
     if (auth.isLoggedIn) chatStore.loadConversations(auth.userId)
   }
   if (meta.action) {
-    // 导航/执行类操作：直接执行，不显示在聊天框
+    // 导航/执行类操作：仅在没有文字内容时移除消息
     const silentTypes = ['switchTab', 'loadQuestion', 'loadToEditor', 'runCode', 'resetCode', 'generateScenario']
     if (silentTypes.includes(meta.action.type)) {
       const last = chatMessages.value[chatMessages.value.length - 1]
-      if (last?.role === 'assistant') chatMessages.value.pop()
+      // 已流式输出文字时不弹出，仅在无文字或 silent=true 时移除
+      if (last?.role === 'assistant' && (!last.content || meta.silent)) {
+        chatMessages.value.pop()
+      }
     }
     emit('action', meta.action)
   }
@@ -92,9 +95,15 @@ watch(() => sse.state.value, (state) => {
   if (state === 'done' && chatMessages.value.length) {
     const last = chatMessages.value[chatMessages.value.length - 1]
     if (last.role === 'assistant' && !last.content) {
-      last.content = sse.text.value
+      last.content = sse.text.value || '（暂无回复）'
     }
     scrollToBottom()
+  }
+  if (state === 'error' && chatMessages.value.length) {
+    const last = chatMessages.value[chatMessages.value.length - 1]
+    if (last.role === 'assistant' && !last.content) {
+      last.content = sse.error.value || '对话失败，请检查 API Key 配置'
+    }
   }
 })
 
@@ -112,7 +121,7 @@ async function sendMessage() {
   scrollToBottom()
   await sse.send('/api/lab/assistant/chat/stream', {
     conversationId: currentConvId.value,
-    message: msg, userId: auth.userId,
+    message: msg, userId: auth.userId || 'anonymous',
     currentCode: props.currentCode,
     knowledgePoint: props.currentKnowledgePoint || '',
     originalCode: props.originalCode,

@@ -5,8 +5,12 @@ import com.alibaba.fastjson2.JSONObject;
 import com.cortex.lab.dto.TutorExplainResponse;
 import com.cortex.lab.dto.TutorReviewResponse;
 import com.cortex.lab.entity.QuestionBank;
+import com.cortex.lab.entity.QuestionProgress;
 import com.cortex.lab.mapper.QuestionBankMapper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.cortex.lab.mapper.QuestionProgressMapper;
 import com.cortex.llm.LlmClient;
+import java.time.LocalDateTime;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -19,6 +23,7 @@ public class TutorService {
 
     private final LlmClient llmClient;
     private final QuestionBankMapper questionBankMapper;
+    private final QuestionProgressMapper progressMapper;
 
     private static final String ASSESS_PROMPT = """
 你是一个Java八股文导师。用户正在自评一道题，根据他答对/答错给出相应反馈。
@@ -92,6 +97,32 @@ public class TutorService {
                 resp.setFeedback("再想想，看看题目中的陷阱在哪里");
                 resp.setExamples(java.util.List.of("仔细对比代码中的关键差异"));
             }
+        }
+
+        // 同步掌握状态：答对标记已掌握，答错标记未掌握
+        try {
+            QuestionProgress prog = progressMapper.selectOne(
+                new LambdaQueryWrapper<QuestionProgress>()
+                    .eq(QuestionProgress::getQuestionId, questionId)
+                    .eq(QuestionProgress::getUserId, userId)
+                    .last("LIMIT 1")
+            );
+            if (prog == null) {
+                prog = new QuestionProgress();
+                prog.setQuestionId(questionId);
+                prog.setUserId(userId);
+                prog.setMastered(correct);
+                prog.setReviewCount(0);
+                prog.setGmtCreate(LocalDateTime.now());
+                prog.setGmtModified(LocalDateTime.now());
+                progressMapper.insert(prog);
+            } else {
+                prog.setMastered(correct);
+                prog.setGmtModified(LocalDateTime.now());
+                progressMapper.updateById(prog);
+            }
+        } catch (Exception e) {
+            log.warn("同步掌握状态失败: {}", e.getMessage());
         }
 
         return resp;

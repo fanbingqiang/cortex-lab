@@ -25,15 +25,14 @@ public class KnowledgeCardService {
     private final LlmClient llmClient;
 
     private static final String CARD_PROMPT = """
-    你是一个知识整理专家。请根据以下信息生成一张极简知识卡片。
-    要求：语言极其简练，只保留最核心信息。新手一看就懂。
+    你是一个知识整理专家。请根据以下信息生成一张知识卡片。
     返回严格的 JSON 格式（不要 markdown 标记）：
     {
-      "title": "6字以内",
-      "keyPoints": "要点1|要点2（每条6字以内，最多3条）",
-      "detailExplanation": "一句话（20字以内）",
-      "codeSnippet": "正确代码示例（6行以内，只展示关键差异）",
-      "commonPitfalls": "误区1|误区2（每条10字以内）"
+      "title": "知识点标题（不超过50字）",
+      "keyPoints": "要点1|要点2|要点3（每条不超过30字）",
+      "detailExplanation": "详细解释（200字以内）",
+      "codeSnippet": "正确代码示例（10行以内，只展示关键差异）",
+      "commonPitfalls": "误区1|误区2（每条不超过30字）"
     }
     题目: %s
     陷阱: %s
@@ -87,9 +86,9 @@ public class KnowledgeCardService {
             log.error("生成知识卡片失败", e);
             KnowledgeCard card = new KnowledgeCard();
             card.setQuestionId(questionId);
-            card.setTitle(truncate(q.getTitle(), 6));
+            card.setTitle(q.getTitle());
             card.setKeyPoints("读代码|猜输出|看结果");
-            card.setDetailExplanation(truncate(q.getCorrectExplanation() != null ? q.getCorrectExplanation() : q.getExpectedPitfall(), 20));
+            card.setDetailExplanation(q.getCorrectExplanation() != null ? q.getCorrectExplanation() : q.getExpectedPitfall());
             card.setCodeSnippet(q.getTrapCode());
             card.setCommonPitfalls("别想当然|动手验证");
             card.setGmtCreate(LocalDateTime.now());
@@ -140,8 +139,4 @@ public class KnowledgeCardService {
         return dto;
     }
 
-    private String truncate(String s, int max) {
-        if (s == null) return "";
-        return s.length() <= max ? s : s.substring(0, max);
-    }
 }

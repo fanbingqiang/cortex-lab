@@ -45,8 +45,6 @@ echo ========================================
 echo   All services started!
 echo.
 echo   Frontend: http://localhost:8081/lab/
-echo   Admin:    http://localhost:8081/admin/index.html
-echo   Login:    admin / admin123
 echo.
 echo   To stop:  stop.bat
 echo ========================================

@@ -1,5 +1,6 @@
 package com.cortex.lab.service;
 
+import com.alibaba.fastjson2.JSON;
 import com.cortex.lab.dto.LearningReportDTO;
 import com.cortex.lab.dto.UserInfoDTO;
 import com.cortex.llm.LlmClient;
@@ -7,6 +8,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -89,7 +91,37 @@ public class ReportNarrativeService {
             return com.cortex.util.JsonUtils.cleanJson(llmClient.chatSimple("你是一名学习分析师", prompt));
         } catch (Exception e) {
             log.error("生成AI叙事报告失败", e);
-            return "报告生成失败: " + e.getMessage();
+            return buildFallbackNarrativeJson(userId, reportType, e.getMessage());
+        }
+    }
+
+    private String buildFallbackNarrativeJson(String userId, String reportType, String reason) {
+        try {
+            UserInfoDTO userInfo = authService.getUserInfo(userId);
+            LearningReportDTO report = learningReportService.generateReport(userId, reportType);
+            Map<String, Object> fallback = new LinkedHashMap<>();
+            fallback.put("summary", userInfo.getUsername() + " 的" + ("WEEKLY".equalsIgnoreCase(reportType) ? "周" : "月") + "学习概况");
+            fallback.put("performance", String.format(
+                "本周期答题 %d 道，正确 %d 道，正确率 %.1f%%，学习 %d 分钟。%s",
+                report.getTotalQuestionsAnswered(),
+                report.getTotalCorrect(),
+                report.getAccuracy(),
+                report.getTotalStudyMinutes(),
+                reason != null && reason.contains("API") ? "（AI 分析暂不可用，请配置 LLM_API_KEY）" : ""
+            ));
+            fallback.put("recommendations", List.of(
+                "继续巩固薄弱知识点",
+                "保持每日练习习惯",
+                "复习待做题目"
+            ));
+            return JSON.toJSONString(fallback);
+        } catch (Exception ex) {
+            Map<String, Object> minimal = Map.of(
+                "summary", "学习报告",
+                "performance", "暂无足够学习数据，请先完成一些练习后再生成报告。" + (reason != null ? "（" + reason + "）" : ""),
+                "recommendations", List.of("从知识树选择知识点开始练习")
+            );
+            return JSON.toJSONString(minimal);
         }
     }
 

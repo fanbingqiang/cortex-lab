@@ -4,6 +4,7 @@ import com.alibaba.fastjson2.JSON;
 import com.cortex.lab.dto.KnowledgeNodeDTO;
 import com.cortex.lab.dto.ProjectInfoDTO;
 import com.cortex.lab.dto.ScenarioDto;
+import com.cortex.config.LlmConfigResolver;
 import com.cortex.lab.entity.AssistantConfig;
 import com.cortex.lab.entity.LabScenario;
 import com.cortex.lab.entity.QuestionBank;
@@ -18,6 +19,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -29,12 +31,16 @@ public class KnowledgeTreeService {
     private final LabScenarioMapper scenarioMapper;
     private final LlmClient llmClient;
     private final AssistantConfigMapper configMapper;
+    private final LlmConfigResolver llmConfigResolver;
     private final SpringProjectService springProjectService;
     private final QuestionBankMapper questionBankMapper;
     private final KnowledgeCardService knowledgeCardService;
 
     private final ExecutorService cardGeneratorExecutor = Executors.newSingleThreadExecutor(r ->
         new Thread(r, "card-generator-" + r.hashCode()));
+
+    /** 内存缓存：nodeId → 已生成内容（DB 为持久层） */
+    private final ConcurrentHashMap<String, ScenarioDto> scenarioCache = new ConcurrentHashMap<>();
 
     // ======================== 知识树构建 ========================
 
@@ -662,6 +668,12 @@ public class KnowledgeTreeService {
             throw new RuntimeException("未找到知识点: " + nodeId);
         }
 
+        ScenarioDto cached = getCachedScenario(nodeId);
+        if (cached != null) {
+            log.debug("命中缓存 nodeId={}", nodeId);
+            return cached;
+        }
+
         String knowledgePoint = found.getName();
         String description = found.getDescription();
         String type = found.getType();
@@ -686,8 +698,13 @@ public class KnowledgeTreeService {
                     .eq(LabScenario::getKnowledgePoint, mappedKnowledgePoint)
             );
             if (mapped != null) {
-                log.info("知识点 [{}] -> 映射到已有场景 [{}]", nodeId, mappedKnowledgePoint);
-                return toDto(mapped);
+                if (isFallbackScenario(mapped)) {
+                    scenarioMapper.deleteById(mapped.getId());
+                    log.info("删除旧 fallback 记录 [{}]（SCENARIO_MAP），将重新生成", mapped.getId());
+                } else {
+                    log.info("知识点 [{}] -> 映射到已有场景 [{}]", nodeId, mappedKnowledgePoint);
+                    return attachNodeIdAndCache(nodeId, mapped);
+                }
             }
         }
 
@@ -695,15 +712,21 @@ public class KnowledgeTreeService {
         LabScenario existing = scenarioMapper.selectOne(
             new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<LabScenario>()
                 .eq(LabScenario::getKnowledgePoint, knowledgePoint)
+                .last("LIMIT 1")
         );
         if (existing != null) {
-            log.info("知识点 [{}] 已有缓存场景，直接返回", knowledgePoint);
-            return toDto(existing);
+            if (isFallbackScenario(existing)) {
+                scenarioMapper.deleteById(existing.getId());
+                log.info("删除旧 fallback 记录 [{}]（精确匹配），将重新生成", existing.getId());
+            } else {
+                log.info("知识点 [{}] 已有 DB 缓存，直接返回", knowledgePoint);
+                return attachNodeIdAndCache(nodeId, existing);
+            }
         }
 
         // Try to generate via LLM (trap code)
         try {
-            Map<String, String> llmConfig = getUserLlmConfig();
+            Map<String, String> llmConfig = llmConfigResolver.resolve();
             String result = llmClient.chatSimple(
                     llmConfig.get("api_key"),
                     llmConfig.get("base_url"),
@@ -714,6 +737,7 @@ public class KnowledgeTreeService {
             ScenarioDto dto = JSON.parseObject(cleaned, ScenarioDto.class);
 
             LabScenario entity = new LabScenario();
+            entity.setNodeId(nodeId);
             entity.setKnowledgePoint(knowledgePoint);
             entity.setCategory(getCategoryForNode(nodeId));
             entity.setTrapCode(dto.getTrapCode());
@@ -724,50 +748,47 @@ public class KnowledgeTreeService {
             entity.setGmtCreate(LocalDateTime.now());
             scenarioMapper.insert(entity);
             dto.setId(entity.getId());
+            cacheScenario(nodeId, entity);
 
             syncToQuestionBankAndGenerateCard(entity);
 
             return dto;
         } catch (Exception e) {
             log.warn("LLM 生成陷阱代码失败，使用概念讲解代替: {}", e.getMessage());
-            // 持久化概念讲解场景，下次直接命中缓存
+            // 不持久化/缓存 fallback，确保配置 API Key 后能重新生成
             String fallback = buildFallbackContent("concept", knowledgePoint, description);
-            LabScenario fallbackEntity = new LabScenario();
-            fallbackEntity.setKnowledgePoint(knowledgePoint);
-            fallbackEntity.setCategory(getCategoryForNode(nodeId));
-            fallbackEntity.setTrapCode("// " + description + "\n// 请配置 API Key 后重新点击生成陷阱代码");
-            fallbackEntity.setExpectedPitfall(description);
-            fallbackEntity.setCorrectExplanation(knowledgePoint + "\n\n" + description);
-            fallbackEntity.setHints("[]");
-            fallbackEntity.setDifficulty(1);
-            fallbackEntity.setGmtCreate(LocalDateTime.now());
-            scenarioMapper.insert(fallbackEntity);
-            syncToQuestionBankAndGenerateCard(fallbackEntity);
-            ScenarioDto fallbackDto = toDto(fallbackEntity);
-            fallbackDto.setTrapCode(fallback);
-            return fallbackDto;
+            return new ScenarioDto(null, knowledgePoint, getCategoryForNode(nodeId),
+                fallback, description, knowledgePoint + "\n\n" + description,
+                null, 1, null, fallback);
         }
     }
 
     // 非陷阱类型通用生成器：查缓存 → LLM 生成 → 持久化 → 返回
     private ScenarioDto generateNonTrapContent(String contentType, String prompt, String nodeId) {
+        ScenarioDto cached = getCachedScenario(nodeId);
+        if (cached != null) {
+            return cached;
+        }
+
         KnowledgeNodeDTO node = findNode(getTree(), nodeId);
         String knowledgePoint = node.getName();
         String description = node.getDescription();
 
         // 查缓存：按 type + knowledgePoint 查找
         try {
-            LabScenario cached = scenarioMapper.selectOne(
+            LabScenario dbRow = scenarioMapper.selectOne(
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<LabScenario>()
                     .eq(LabScenario::getType, contentType)
                     .eq(LabScenario::getKnowledgePoint, knowledgePoint)
                     .last("LIMIT 1")
             );
-            if (cached != null) {
-                ScenarioDto dto = toDto(cached);
-                dto.setType(contentType);
-                dto.setGeneratedContent(cached.getGeneratedContent());
-                return dto;
+            if (dbRow != null) {
+                if (isFallbackScenario(dbRow)) {
+                    scenarioMapper.deleteById(dbRow.getId());
+                    log.info("删除旧 fallback 记录 [{}]（类型缓存），将重新生成", dbRow.getId());
+                } else {
+                    return attachNodeIdAndCache(nodeId, dbRow);
+                }
             }
         } catch (Exception e) {
             log.warn("查询缓存失败: {}", e.getMessage());
@@ -775,7 +796,7 @@ public class KnowledgeTreeService {
 
         // 尝试 LLM 生成
         try {
-            Map<String, String> llmConfig = getUserLlmConfig();
+            Map<String, String> llmConfig = llmConfigResolver.resolve();
             String result = llmClient.chatSimple(
                     llmConfig.get("api_key"),
                     llmConfig.get("base_url"),
@@ -783,8 +804,8 @@ public class KnowledgeTreeService {
                     null,
                     prompt);
 
-            // 持久化到数据库
             LabScenario entity = new LabScenario();
+            entity.setNodeId(nodeId);
             entity.setKnowledgePoint(knowledgePoint);
             entity.setCategory(getCategoryForNode(nodeId));
             entity.setType(contentType);
@@ -798,10 +819,11 @@ public class KnowledgeTreeService {
             dto.setGeneratedContent(result);
             dto.setTrapCode(result);
             dto.setKnowledgePoint(knowledgePoint);
+            cacheScenario(nodeId, entity);
             return dto;
         } catch (Exception e) {
             log.warn("{} 内容生成失败，使用备用内容: {}", contentType, e.getMessage());
-            // LLM 失败时使用硬编码备用内容
+            // 不持久化/缓存，确保配置 API Key 后能重新生成
             String fallback = buildFallbackContent(contentType, knowledgePoint, description);
             return new ScenarioDto(null, knowledgePoint, getCategoryForNode(nodeId),
                 fallback, null, null, null, null, contentType, fallback);
@@ -829,7 +851,7 @@ public class KnowledgeTreeService {
 %s — %s
 
 ## 常用操作
-请配置 API Key 后，AI 自动生成命令演示和实战场景。
+请先在小C助手的「配置」面板中填写 API Key。
 
 ## 学习建议
 1. 在开发环境中实际操作
@@ -844,7 +866,7 @@ public class KnowledgeTreeService {
 %s
 
 ## 复杂度分析
-请配置 API Key 后 AI 自动生成算法实现。
+请先在小C助手的「配置」面板中填写 API Key。
 
 ## 学习建议
 1. 先理解算法思路
@@ -983,8 +1005,70 @@ public class KnowledgeTreeService {
         return "Java";
     }
 
+    private ScenarioDto getCachedScenario(String nodeId) {
+        ScenarioDto mem = scenarioCache.get(nodeId);
+        if (mem != null) {
+            // 内存中若为旧 fallback，清除后重新生成（用户可能刚配置了 API Key）
+            if (isFallbackScenario(mem)) {
+                log.debug("内存缓存为 fallback，跳过并重新生成 nodeId={}", nodeId);
+                scenarioCache.remove(nodeId);
+            } else {
+                return mem;
+            }
+        }
+        LabScenario db = scenarioMapper.selectOne(
+            new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<LabScenario>()
+                .eq(LabScenario::getNodeId, nodeId)
+                .last("LIMIT 1")
+        );
+        if (db != null) {
+            // 清除 DB 中旧 fallback 记录，确保配置 API Key 后能重新生成
+            if (isFallbackScenario(db)) {
+                log.info("清除节点 [{}] 的旧 fallback 缓存，将重新生成", nodeId);
+                scenarioMapper.deleteById(db.getId());
+                return null;
+            }
+            ScenarioDto dto = toDto(db);
+            scenarioCache.put(nodeId, dto);
+            return dto;
+        }
+        return null;
+    }
+
+    /** 判断是否为无 API Key 时的 fallback 内容 */
+    private boolean isFallbackScenario(LabScenario e) {
+        return e.getDifficulty() != null && e.getDifficulty() == 1
+            && e.getTrapCode() != null && e.getTrapCode().contains("请配置");
+    }
+
+    private boolean isFallbackScenario(ScenarioDto dto) {
+        return dto.getDifficulty() != null && dto.getDifficulty() == 1
+            && dto.getTrapCode() != null && dto.getTrapCode().contains("请配置");
+    }
+
+    private ScenarioDto attachNodeIdAndCache(String nodeId, LabScenario entity) {
+        if (entity.getNodeId() == null || entity.getNodeId().isBlank()) {
+            entity.setNodeId(nodeId);
+            scenarioMapper.updateById(entity);
+        }
+        ScenarioDto dto = toDto(entity);
+        scenarioCache.put(nodeId, dto);
+        return dto;
+    }
+
+    private void cacheScenario(String nodeId, LabScenario entity) {
+        scenarioCache.put(nodeId, toDto(entity));
+    }
+
     private void syncToQuestionBankAndGenerateCard(LabScenario scenario) {
         try {
+            long exists = questionBankMapper.selectCount(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<QuestionBank>()
+                    .eq(QuestionBank::getTitle, scenario.getKnowledgePoint())
+            );
+            if (exists > 0) {
+                return;
+            }
             QuestionBank qb = new QuestionBank();
             qb.setTitle(scenario.getKnowledgePoint());
             qb.setDescription(scenario.getExpectedPitfall());
@@ -1028,26 +1112,5 @@ public class KnowledgeTreeService {
         dto.setType(entity.getType());
         dto.setGeneratedContent(entity.getGeneratedContent());
         return dto;
-    }
-
-    private Map<String, String> getUserLlmConfig() {
-        Map<String, String> cfg = new java.util.HashMap<>();
-        cfg.put("api_key", null);
-        cfg.put("base_url", "https://api.deepseek.com");
-        cfg.put("model", "deepseek-chat");
-        try {
-            List<AssistantConfig> configs = configMapper.selectList(null);
-            for (AssistantConfig c : configs) {
-                String key = c.getConfigKey();
-                String val = c.getConfigValue();
-                if (("api_key".equals(key) || "base_url".equals(key) || "model".equals(key))
-                    && val != null && !val.isBlank() && !"your-api-key-here".equals(val)) {
-                    cfg.put(key, val);
-                }
-            }
-        } catch (Exception e) {
-            log.warn("读取LLM配置失败: {}", e.getMessage());
-        }
-        return cfg;
     }
 }

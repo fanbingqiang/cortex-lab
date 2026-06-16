@@ -26,14 +26,20 @@ public class LlmRequest {
         }
     }
     
-    // 创建带 system prompt 的请求
+    // 创建带 system prompt 的请求（systemPrompt 可为 null）
     public static LlmRequest create(String model, String systemPrompt, String userMessage) {
         LlmRequest request = new LlmRequest();
         request.setModel(model);
-        request.setMessages(List.of(
-            new Message("system", systemPrompt),
-            new Message("user", userMessage)
-        ));
+        if (systemPrompt != null && !systemPrompt.isBlank()) {
+            request.setMessages(List.of(
+                new Message("system", systemPrompt),
+                new Message("user", userMessage)
+            ));
+        } else {
+            request.setMessages(List.of(
+                new Message("user", userMessage)
+            ));
+        }
         request.setTemperature(0.7);
         request.setMaxTokens(4096);
         return request;

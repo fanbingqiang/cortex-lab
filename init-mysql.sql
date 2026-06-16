@@ -10,6 +10,9 @@ CREATE DATABASE IF NOT EXISTS `cortex2`
 
 USE `cortex2`;
 
+SET NAMES utf8mb4;
+SET CHARACTER SET utf8mb4;
+
 -- ============================================================================
 -- 1. 核心基础表
 -- ============================================================================
@@ -118,6 +121,7 @@ CREATE TABLE IF NOT EXISTS `llm_call_log` (
 -- 实验室场景（陷阱题目）
 CREATE TABLE IF NOT EXISTS `lab_scenario` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `node_id` VARCHAR(100) DEFAULT NULL COMMENT '知识树节点ID，用于缓存命中',
     `knowledge_point` VARCHAR(200) NOT NULL,
     `category` VARCHAR(100) DEFAULT NULL,
     `trap_code` TEXT NOT NULL,
@@ -129,6 +133,7 @@ CREATE TABLE IF NOT EXISTS `lab_scenario` (
     `generated_content` TEXT DEFAULT NULL COMMENT '非陷阱类型的完整内容',
     `gmt_create` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_node_id` (`node_id`),
     KEY `idx_knowledge_point` (`knowledge_point`),
     KEY `idx_category` (`category`),
     KEY `idx_difficulty` (`difficulty`)
@@ -529,7 +534,53 @@ CREATE TABLE IF NOT EXISTS `interview_candidate` (
 -- 6. 用户认证与学习
 -- ============================================================================
 
--- 用户认证
+-- 用户表（与 Java User 实体对齐：认证 + 学习画像）
+CREATE TABLE IF NOT EXISTS `user` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `user_id` VARCHAR(50) NOT NULL,
+    `username` VARCHAR(100) NOT NULL,
+    `password_hash` VARCHAR(255) NOT NULL,
+    `email` VARCHAR(200) DEFAULT NULL,
+    `avatar` VARCHAR(500) DEFAULT NULL,
+    `role` VARCHAR(20) NOT NULL DEFAULT 'USER',
+    `status` VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+    `last_login_time` TIMESTAMP NULL DEFAULT NULL,
+    `personality_tags` VARCHAR(500) DEFAULT NULL,
+    `work_habits` VARCHAR(500) DEFAULT NULL,
+    `preferences` VARCHAR(1000) DEFAULT NULL,
+    `total_study_hours` DOUBLE NOT NULL DEFAULT 0,
+    `total_questions_answered` INT NOT NULL DEFAULT 0,
+    `total_correct` INT NOT NULL DEFAULT 0,
+    `study_streak` INT NOT NULL DEFAULT 0,
+    `last_study_date` DATE DEFAULT NULL,
+    `weak_areas` VARCHAR(1000) DEFAULT NULL,
+    `preferred_direction` VARCHAR(500) DEFAULT NULL,
+    `learning_goal` VARCHAR(500) DEFAULT NULL,
+    `skill_level` VARCHAR(20) NOT NULL DEFAULT 'BEGINNER',
+    `gmt_create` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `gmt_modified` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_user_id` (`user_id`),
+    UNIQUE KEY `uk_username` (`username`),
+    KEY `idx_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户（认证+画像）';
+
+-- 每日学习日志（与 Java DailyLearning 实体对齐）
+CREATE TABLE IF NOT EXISTS `daily_learning` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `user_id` VARCHAR(50) NOT NULL,
+    `log_date` DATE NOT NULL,
+    `questions_answered` INT NOT NULL DEFAULT 0,
+    `correct_count` INT NOT NULL DEFAULT 0,
+    `study_minutes` INT NOT NULL DEFAULT 0,
+    `knowledge_points_studied` VARCHAR(1000) DEFAULT NULL,
+    `gmt_create` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_user_date` (`user_id`, `log_date`),
+    KEY `idx_log_date` (`log_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='每日学习日志';
+
+-- 用户认证（预留拆分，当前 Java 使用 user 表）
 CREATE TABLE IF NOT EXISTS `user_auth` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `user_id` VARCHAR(50) NOT NULL,
@@ -656,43 +707,7 @@ INSERT IGNORE INTO `agent_metadata` (`agent_id`, `name`, `description`, `capabil
  '["report","summary","documentation"]', '["text","json"]', '["text","markdown"]', 1, 1,
  '你是一个专业的技术文档撰写专家。请根据提供的信息，生成一份结构清晰、内容详实的报告，包括：\n1. 摘要\n2. 详细分析\n3. 结论和建议\n\n请使用Markdown格式输出。');
 
--- 预置陷阱题目
-INSERT IGNORE INTO `lab_scenario` (`knowledge_point`, `category`, `trap_code`, `expected_pitfall`, `correct_explanation`, `hints`, `difficulty`) VALUES
-('为什么 Integer 用 == 比较 100 是 true，200 却是 false？', 'Java基础',
-'public class IntegerCacheTrap {\n    public static void main(String[] args) {\n        Integer a = 100;\n        Integer b = 100;\n        Integer c = 200;\n        Integer d = 200;\n\n        System.out.println("100 == 100 ? " + (a == b));\n        System.out.println("200 == 200 ? " + (c == d));\n        System.out.println("equals 200 ? " + (c.equals(d)));\n        System.out.println("new Integer(100) == 100 ? " + (new Integer(100) == a));\n    }\n}',
-'用 == 比较 Integer 时，小数值返回 true，大数值返回 false',
-'Integer 在 -128~127 之间用缓存池，自动装箱时复用对象。超出范围创建新对象，== 比的是引用地址。用 equals 比较值。',
-'["四个输出中哪些是 true 哪些是 false？", "100 和 200 的行为不一样，分界线在哪？", "猜猜 Java 是不是给常用数字做了缓存？范围是多少？"]', 1),
-
-('为什么 new String("hello") 用 == 比较结果是 false？', 'Java基础',
-'public class StringEqualsTrap {\n    public static void main(String[] args) {\n        String s1 = "hello";\n        String s2 = "hello";\n        String s3 = new String("hello");\n        String s4 = new String("hello");\n\n        System.out.println("字面量 == 字面量: " + (s1 == s2));\n        System.out.println("new String == 字面量: " + (s3 == s1));\n        System.out.println("new String == new String: " + (s3 == s4));\n        System.out.println("new String equals new String: " + (s3.equals(s4)));\n\n        String s5 = "hel" + "lo";\n        System.out.println("拼接字面量 == 字面量: " + (s5 == s1));\n    }\n}',
-'new 出来的 String 用 == 比较返回 false，字面量和拼接字面量用 == 返回 true',
-'== 比较引用地址，equals 比较内容。字面量在常量池复用，new 在堆上创建新对象。编译期 "hel"+"lo" 优化为 "hello"。',
-'["同样内容，有的 == true，有的 false，原因在哪？", "字面量和 new 创建 String 的区别是什么？", "equals 和 == 分别比较什么？"]', 1),
-
-('为什么方法里改了 List，外面的 List 也变了？', 'Java基础',
-'import java.util.*;\n\npublic class ListPassByRef {\n    public static void main(String[] args) {\n        List<String> myList = new ArrayList<>();\n        myList.add("苹果");\n        myList.add("香蕉");\n\n        System.out.println("调用前: " + myList);\n        addFruit(myList);\n        System.out.println("调用后: " + myList);\n        System.out.println("列表大小: " + myList.size());\n    }\n\n    static void addFruit(List<String> list) {\n        list.add("橘子");\n        System.out.println("方法内部: " + list);\n    }\n}',
-'方法外部的列表被内部修改了',
-'Java 是值传递，但对象参数传递的是引用的副本，指向同一个对象。修改对象内容会影响外部。但 list = new ArrayList() 不会影响外部。',
-'["调用前后 myList 变了没？", "Java 是值传递还是引用传递？", "如果方法内 list = new ArrayList()，外面会变吗？"]', 1),
-
-('HashMap 用 Person 做 key，为什么 get 不到值？', 'Java基础',
-'import java.util.*;\n\nclass Person {\n    String name;\n    Person(String name) { this.name = name; }\n}\n\npublic class HashMapKeyTrap {\n    public static void main(String[] args) {\n        Map<Person, String> map = new HashMap<>();\n        map.put(new Person("小明"), "学生");\n        map.put(new Person("小红"), "老师");\n\n        System.out.println("查询小明: " + map.get(new Person("小明")));\n        System.out.println("map 大小: " + map.size());\n\n        Person p = new Person("小李");\n        map.put(p, "医生");\n        System.out.println("用原对象查询: " + map.get(p));\n    }\n}',
-'new 一个相同字段的对象去 HashMap 中 get，返回 null',
-'HashMap 依赖 hashCode() 和 equals() 定位 key。自定义类没重写这两个方法，用的是 Object 的默认实现（比较引用地址）。',
-'["get 返回了什么？", "HashMap 怎么判断 key 相等？", "需要重写哪两个方法？"]', 2),
-
-('为什么 try 里 return 了，finally 还会执行？', 'Java基础',
-'public class FinallyTrap {\n    public static void main(String[] args) {\n        System.out.println("返回值: " + test());\n    }\n\n    static int test() {\n        int x = 1;\n        try {\n            System.out.println("try 中");\n            return x++;\n        } finally {\n            System.out.println("finally 中, x=" + x);\n        }\n    }\n}',
-'finally 在 return 之后执行，返回值是 return 时保存的值',
-'finally 块在 try 的 return 之前执行，但返回值为 return 语句执行时的值。x++ 是先返回后自增，所以返回值是 1，finally 中 x=2。',
-'["return x++ 的返回值是多少？", "finally 在 return 之前还是之后执行？", "x++ 和 ++x 的区别？"]', 2),
-
-('异常捕获：多个 catch 的顺序有讲究吗？', 'Java基础',
-'public class CatchOrderTrap {\n    public static void main(String[] args) {\n        try {\n            int[] arr = new int[3];\n            System.out.println(arr[5]);\n        } catch (RuntimeException e) {\n            System.out.println("捕获 RuntimeException");\n        } catch (ArrayIndexOutOfBoundsException e) {\n            System.out.println("捕获数组越界");\n        }\n        System.out.println("程序结束");\n    }\n}',
-'ArrayIndexOutOfBoundsException 是 RuntimeException 的子类，第一个 catch 已捕获，第二个永远执行不到',
-'catch 顺序很重要：子类异常在前，父类在后。ArrayIndexOutOfBoundsException 继承 RuntimeException，所以被第一个 catch 捕获。编译时会因不可达代码报错。',
-'["运行后输出了什么？", "两个 catch 的顺序有什么问题？", "Exception 的继承体系是怎样的？"]', 2);
+-- 预置陷阱题目（改由 Java BuiltinScenarioSeedService 写入，避免 SQL 文件编码导致乱码）
 
 -- ============================================================================
 -- 8. 新学习场景模块

@@ -3,6 +3,7 @@ package com.cortex.llm;
 import cn.hutool.core.util.StrUtil;
 import com.alibaba.fastjson2.JSON;
 import com.cortex.config.LlmConfig;
+import com.cortex.config.LlmConfigResolver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.*;
@@ -21,26 +22,51 @@ public class LlmClient {
     // LLM API 调用客户端，支持流式和非流式调用
     
     private final LlmConfig llmConfig;
-    
+    private final LlmConfigResolver llmConfigResolver;
+
     private final OkHttpClient httpClient = new OkHttpClient.Builder()
             .connectTimeout(60, TimeUnit.SECONDS)
             .readTimeout(120, TimeUnit.SECONDS)
             .writeTimeout(60, TimeUnit.SECONDS)
             .build();
+
+    private static final int MAX_RETRIES = 2;
     
-    // 使用默认配置调用 LLM
+    // 使用统一配置调用 LLM（从 DB 读取，确保全平台生效）
     public LlmResponse chat(LlmRequest request) {
-        return chat(llmConfig.getDefaultConfig().getBaseUrl(), llmConfig.getDefaultConfig().getApiKey(), request);
+        java.util.Map<String, String> cfg = llmConfigResolver.resolve();
+        return chat(
+            cfg.getOrDefault("base_url", llmConfig.getDefaultConfig().getBaseUrl()),
+            cfg.getOrDefault("api_key", llmConfig.getDefaultConfig().getApiKey()),
+            request);
     }
     
     public LlmResponse chat(String baseUrl, String apiKey, LlmRequest request) {
         if (StrUtil.isBlank(apiKey) || "your-api-key-here".equals(apiKey)) {
             throw new RuntimeException("请配置有效的API Key");
         }
-        
         String url = baseUrl + "/chat/completions";
         String jsonBody = JSON.toJSONString(request);
-        
+        // 简单重试：API 临时错误时自动重试
+        Exception lastEx = null;
+        for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+            if (attempt > 0) {
+                log.warn("LLM 调用重试第 {} 次", attempt);
+                try { Thread.sleep(1000L * attempt); } catch (InterruptedException ignored) {}
+            }
+            try {
+                return doChat(url, apiKey, jsonBody);
+            } catch (Exception e) {
+                lastEx = e;
+                if (e.getMessage() != null && (e.getMessage().contains("401") || e.getMessage().contains("402") || e.getMessage().contains("403") || e.getMessage().contains("429"))) {
+                    throw e;
+                }
+            }
+        }
+        throw new RuntimeException("LLM API调用失败（重试" + MAX_RETRIES + "次后）: " + lastEx.getMessage(), lastEx);
+    }
+
+    private LlmResponse doChat(String url, String apiKey, String jsonBody) {
         Request httpRequest = new Request.Builder()
                 .url(url)
                 .addHeader("Authorization", "Bearer " + apiKey)
@@ -65,16 +91,20 @@ public class LlmClient {
         }
     }
     
-    // 简易聊天：带 system prompt 的调用
+    // 简易聊天：带 system prompt 的调用（使用统一配置）
     public String chatSimple(String systemPrompt, String userMessage) {
-        LlmRequest request = LlmRequest.create(llmConfig.getDefaultConfig().getModel(), systemPrompt, userMessage);
+        java.util.Map<String, String> cfg = llmConfigResolver.resolve();
+        String model = cfg.getOrDefault("model", llmConfig.getDefaultConfig().getModel());
+        LlmRequest request = LlmRequest.create(model, systemPrompt, userMessage);
         LlmResponse response = chat(request);
         return response.getContent();
     }
 
-    // 简易聊天：只有 user 消息
+    // 简易聊天：只有 user 消息（使用统一配置）
     public String chatSimple(String userMessage) {
-        LlmRequest request = LlmRequest.create(llmConfig.getDefaultConfig().getModel(), userMessage);
+        java.util.Map<String, String> cfg = llmConfigResolver.resolve();
+        String model = cfg.getOrDefault("model", llmConfig.getDefaultConfig().getModel());
+        LlmRequest request = LlmRequest.create(model, userMessage);
         LlmResponse response = chat(request);
         return response.getContent();
     }
@@ -97,9 +127,13 @@ public class LlmClient {
 
     // ==================== 流式 SSE 调用 ====================
 
-    // 流式聊天，使用默认配置
+    // 流式聊天，使用统一配置
     public void chatStream(LlmRequest request, Consumer<String> onChunk, Consumer<String> onThinking, Runnable onComplete, Consumer<Exception> onError) {
-        chatStream(llmConfig.getDefaultConfig().getBaseUrl(), llmConfig.getDefaultConfig().getApiKey(), request, onChunk, onThinking, onComplete, onError);
+        java.util.Map<String, String> cfg = llmConfigResolver.resolve();
+        chatStream(
+            cfg.getOrDefault("base_url", llmConfig.getDefaultConfig().getBaseUrl()),
+            cfg.getOrDefault("api_key", llmConfig.getDefaultConfig().getApiKey()),
+            request, onChunk, onThinking, onComplete, onError);
     }
 
     // 流式聊天，指定 baseUrl 和 apiKey

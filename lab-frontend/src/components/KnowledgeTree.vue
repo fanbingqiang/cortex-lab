@@ -26,7 +26,7 @@ function filterNode(node: any, query: string): any {
 }
 </script>
 <template>
-  <div>
+  <div class="knowledge-tree-root">
     <div class="tree-search-box">
       <input v-model="searchQuery" placeholder="搜索知识点..." style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;outline:none;box-sizing:border-box;" />
     </div>
@@ -41,5 +41,22 @@ function filterNode(node: any, query: string): any {
   </div>
 </template>
 <style scoped>
-:scope { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.knowledge-tree-root {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.tree-search-box {
+  flex-shrink: 0;
+  padding: 8px 10px;
+}
+.tree-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 0 8px;
+}
 </style>

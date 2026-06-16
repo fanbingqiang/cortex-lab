@@ -111,6 +111,8 @@ const contentTypeLabel = computed(() => {
   return labels[currentContentType.value || 'trap'] || '代码'
 })
 
+const generatingNode = ref(false)
+
 // ---------- 选择树节点 ----------
 async function selectTreeNode(node: KnowledgeNode) {
   if (!node.leaf) return
@@ -120,9 +122,10 @@ async function selectTreeNode(node: KnowledgeNode) {
   isProjectMode.value = false
   currentScenario.value = null
   currentQuestionId.value = null
-  terminalOutput.value = ''
+  terminalOutput.value = '正在生成内容，请稍候...'
   editorCode.value = ''
   currentContentType.value = null
+  generatingNode.value = true
 
   try {
     if (node.type === 'project') {
@@ -162,11 +165,18 @@ async function selectTreeNode(node: KnowledgeNode) {
           terminalOutput.value = ''
         }
         sessionId.value = 'session_' + Date.now()
+      } else {
+        terminalOutput.value = '未能生成内容，请检查 API Key 配置（小C助手 → 配置）'
+        showToast('内容生成失败')
       }
     }
   } catch (e: any) {
     console.error('选择节点失败:', e)
-    terminalOutput.value = '错误: ' + (e.message || '加载失败')
+    const msg = e.message || '加载失败'
+    terminalOutput.value = '错误: ' + msg
+    showToast(msg)
+  } finally {
+    generatingNode.value = false
   }
 }
 

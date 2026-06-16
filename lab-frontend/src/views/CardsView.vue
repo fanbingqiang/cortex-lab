@@ -8,14 +8,14 @@ const store = useQuestionsStore()
 const router = useRouter()
 const expandedId = ref<number | null>(null)
 const editingId = ref<number | null>(null)
-const editForm = ref<{ keyPoints: string; detailExplanation: string; commonPitfalls: string }>({ keyPoints: '', detailExplanation: '', commonPitfalls: '' })
+const editForm = ref<{ title: string; keyPoints: string; detailExplanation: string; commonPitfalls: string }>({ title: '', keyPoints: '', detailExplanation: '', commonPitfalls: '' })
 onMounted(() => store.loadCards())
 function toggle(id: number) { expandedId.value = expandedId.value === id ? null : id }
 function startEdit(c: CardDto) {
-  editingId.value = c.id; editForm.value = { keyPoints: c.keyPoints || '', detailExplanation: c.detailExplanation || '', commonPitfalls: c.commonPitfalls || '' }
+  editingId.value = c.id; editForm.value = { title: c.title || '', keyPoints: c.keyPoints || '', detailExplanation: c.detailExplanation || '', commonPitfalls: c.commonPitfalls || '' }
 }
 async function saveEdit(c: CardDto) {
-  const res = await labApi.put('/cards/' + c.id, { id: c.id, title: c.title, keyPoints: editForm.value.keyPoints, detailExplanation: editForm.value.detailExplanation, commonPitfalls: editForm.value.commonPitfalls })
+  const res = await labApi.put('/cards/' + c.id, { id: c.id, title: editForm.value.title, keyPoints: editForm.value.keyPoints, detailExplanation: editForm.value.detailExplanation, commonPitfalls: editForm.value.commonPitfalls })
   if (res.code === 200) { Object.assign(c, editForm.value); editingId.value = null }
 }
 function cancelEdit() { editingId.value = null }
@@ -44,6 +44,10 @@ function practice(c: CardDto) {
         </div>
         <div v-if="expandedId === c.id" style="border-top:1px solid var(--border);padding:16px;">
           <template v-if="editingId === c.id">
+            <div style="margin-bottom:12px;">
+              <label style="font-size:12px;font-weight:600;color:var(--muted);">标题</label>
+              <input v-model="editForm.title" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px;margin-top:4px;box-sizing:border-box;" />
+            </div>
             <div style="margin-bottom:12px;">
               <label style="font-size:12px;font-weight:600;color:var(--muted);">关键点</label>
               <input v-model="editForm.keyPoints" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px;margin-top:4px;box-sizing:border-box;" />

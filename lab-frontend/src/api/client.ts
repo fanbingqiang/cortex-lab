@@ -11,8 +11,16 @@ function getAuthHeaders(): Record<string, string> {
 }
 
 async function request<T>(method: string, path: string, body?: unknown, prefix = LAB_PREFIX): Promise<ApiResponse<T>> {
-  const res = await fetch(`${prefix}${path}`, { method, headers: getAuthHeaders(), body: body ? JSON.stringify(body) : undefined })
-  return res.json()
+  try {
+    const res = await fetch(`${prefix}${path}`, { method, headers: getAuthHeaders(), body: body ? JSON.stringify(body) : undefined })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      return { code: res.status, message: text || `HTTP ${res.status}`, data: null as T }
+    }
+    return res.json()
+  } catch {
+    return { code: 500, message: '网络异常，请确认后端已启动（端口 8081）', data: null as T }
+  }
 }
 
 export const labApi = {

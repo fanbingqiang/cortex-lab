@@ -89,6 +89,27 @@ async function approve(trapId: number) {
   }
 }
 
+/** 审批拒绝（管理员） */
+async function reject(trapId: number) {
+  if (!confirm('确定拒绝该陷阱？')) return
+  const res = await labApi.post<null>('/community/traps/' + trapId + '/reject')
+  if (res.code === 200) {
+    if (selectedTrap.value) selectedTrap.value.status = 'REJECTED'
+    const found = traps.value.find(t => t.id === trapId)
+    if (found) found.status = 'REJECTED'
+  }
+}
+
+/** 删除陷阱（管理员） */
+async function deleteTrap(trapId: number) {
+  if (!confirm('确定删除该陷阱？')) return
+  const res = await labApi.post<null>('/community/traps/' + trapId + '/delete')
+  if (res.code === 200) {
+    selectedTrap.value = null
+    traps.value = traps.value.filter(t => t.id !== trapId)
+  }
+}
+
 /** 整合到题库 */
 async function integrate(trapId: number) {
   const res = await labApi.post<null>('/community/traps/' + trapId + '/integrate')
@@ -299,10 +320,20 @@ onMounted(() => {
             @click="approve(selectedTrap.id)"
           >审批通过</button>
           <button
+            v-if="selectedTrap.status === 'PENDING'"
+            class="btn btn-danger btn-sm"
+            @click="reject(selectedTrap.id)"
+          >审核不通过</button>
+          <button
             v-if="selectedTrap.status === 'APPROVED'"
             class="btn btn-primary btn-sm"
             @click="integrate(selectedTrap.id)"
           >整合到题库</button>
+          <button
+            class="btn btn-ghost btn-sm"
+            style="color:var(--danger);"
+            @click="deleteTrap(selectedTrap.id)"
+          >删除</button>
         </div>
       </div>
     </div>

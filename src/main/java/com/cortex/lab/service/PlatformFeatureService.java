@@ -142,6 +142,16 @@ public class PlatformFeatureService {
                 case "approveTrap" -> execApproveTrap(extractId(params));
                 case "rejectTrap" -> execRejectTrap(extractId(params));
                 case "integrateTrap" -> execIntegrateTrap(extractId(params));
+                // ---- 复用 executeAction 中的功能（老功能通过 callFeature 调起） ----
+                case "searchQuestions" -> execSearchQuestions(params != null ? (String) params.get("keyword") : "", userId);
+                case "getQuestion" -> execGetQuestion(extractId(params), userId);
+                case "getReviewList" -> execGetReviewList(userId);
+                case "getKnowledgeTree" -> execGetKnowledgeTree();
+                case "generateScenario" -> execGenerateScenario(params != null ? (String) params.get("nodeId") : "");
+                case "listCards" -> execListCards();
+                case "generateCard" -> execGenerateCard(extractId(params));
+                case "deleteCard" -> execDeleteCard(extractId(params));
+                case "deleteQuestion" -> execDeleteQuestion(extractId(params));
                 default -> "未知功能：" + featureName + "，请检查功能名是否正确。";
             };
         } catch (Exception e) {

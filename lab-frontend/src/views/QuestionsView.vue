@@ -18,8 +18,10 @@
             <span @click.stop="toggleM(q)" style="cursor:pointer;font-size:16px;">{{ q.mastered ? '✅' : '⬜' }}</span>
             <div style="flex:1;min-width:0;">
               <div style="font-size:13px;font-weight:500;" :style="q.mastered ? 'text-decoration:line-through;color:var(--muted)' : ''">{{ esc(q.title) }}</div>
-              <div style="font-size:11px;color:var(--muted);">
-                {{ q.category || '未知' }} · {{ '⭐'.repeat(Math.min(q.difficulty||1,5)) }}
+              <div style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:4px;">
+                <span>{{ q.category || '未知' }}</span>
+                <span>{{ '⭐'.repeat(Math.min(q.difficulty||1,5)) }}</span>
+                <span v-if="q.status && q.status !== 'ACTIVE'" :class="'q-status ' + statusClass(q.status)">{{ statusLabel(q.status) }}</span>
                 <span v-if="q.nextReviewTime"> · 复习:{{ fmtDate(q.nextReviewTime) }}</span>
               </div>
             </div>
@@ -33,7 +35,15 @@
           <div style="display:flex;align-items:start;justify-content:space-between;margin-bottom:12px;">
             <div>
               <h2 style="margin:0;font-size:18px;">{{ esc(selectedQ.title) }}</h2>
-              <span style="font-size:12px;color:var(--muted);">{{ selectedQ.category }} · {{ '⭐'.repeat(Math.min(selectedQ.difficulty||1,5)) }}</span>
+              <div style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;margin-top:4px;">
+                <span>{{ selectedQ.category }} · {{ '⭐'.repeat(Math.min(selectedQ.difficulty||1,5)) }}</span>
+                <span v-if="selectedQ.status && selectedQ.status !== 'ACTIVE'" :class="'q-status ' + statusClass(selectedQ.status)">{{ statusLabel(selectedQ.status) }}</span>
+              </div>
+            </div>
+            <div style="display:flex;gap:4px;flex-shrink:0;">
+              <button v-if="selectedQ.status === 'PENDING'" class="btn btn-sm btn-success" @click="approveQ(selectedQ.id)">审核通过</button>
+              <button v-if="selectedQ.status === 'PENDING'" class="btn btn-sm btn-danger" @click="rejectQ(selectedQ.id)">审核不通过</button>
+              <button class="btn btn-sm btn-ghost" style="color:var(--danger);" :disabled="deleting" @click="deleteQ(selectedQ.id)">删除</button>
             </div>
           </div>
           <div v-if="selectedQ.description" style="background:var(--bg);border-radius:8px;padding:12px;margin-bottom:12px;font-size:13px;">{{ esc(selectedQ.description) }}</div>
@@ -186,6 +196,51 @@ const showGenerate = ref(false)
 const showImport = ref(false)
 const showBatchImport = ref(false)
 const discussInput = ref('')
+const deleting = ref(false)
+
+/** 审核通过 */
+async function approveQ(id: number) {
+  const res = await labApi.post('/questions/' + id + '/approve')
+  if (res.code === 200 && selectedQ.value) {
+    selectedQ.value.status = 'ACTIVE'
+    const found = store.questions.find(q => q.id === id)
+    if (found) found.status = 'ACTIVE'
+  }
+}
+
+/** 审核拒绝 */
+async function rejectQ(id: number) {
+  if (!confirm('确定拒绝该题目？')) return
+  const res = await labApi.post('/questions/' + id + '/reject')
+  if (res.code === 200 && selectedQ.value) {
+    selectedQ.value.status = 'REJECTED'
+    const found = store.questions.find(q => q.id === id)
+    if (found) found.status = 'REJECTED'
+  }
+}
+
+/** 删除题目 */
+async function deleteQ(id: number) {
+  if (!confirm('确定删除该题目？')) return
+  deleting.value = true
+  try {
+    await labApi.del('/questions/' + id)
+    store.questions = store.questions.filter(q => q.id !== id)
+    selectedQ.value = null
+    selectedId.value = null
+  } finally {
+    deleting.value = false
+  }
+}
+
+function statusLabel(s: string): string {
+  const map: Record<string, string> = { PENDING: '待审核', ACTIVE: '已通过', REJECTED: '已拒绝' }
+  return map[s] || s
+}
+function statusClass(s: string): string {
+  const map: Record<string, string> = { PENDING: 'badge-warn', ACTIVE: 'badge-ok', REJECTED: 'badge-err' }
+  return map[s] || ''
+}
 
 function loadQ() { store.loadQuestions(auth.userId) }
 onMounted(loadQ)
@@ -302,5 +357,23 @@ function fmtDate(d: string) { return d ? new Date(d).toLocaleDateString() : '' }
 }
 .tutor-tip-link:hover {
   color: #333;
+}
+.q-status {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+.q-status.badge-warn {
+  background: #fef3c7;
+  color: #92400e;
+}
+.q-status.badge-ok {
+  background: #d1fae5;
+  color: #065f46;
+}
+.q-status.badge-err {
+  background: #fee2e2;
+  color: #991b1b;
 }
 </style>

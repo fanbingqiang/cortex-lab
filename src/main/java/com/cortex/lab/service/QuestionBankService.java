@@ -23,6 +23,7 @@ import java.util.stream.Collectors;
 
 @Slf4j
 @Service
+@org.springframework.context.annotation.DependsOn("builtinScenarioSeedService")
 public class QuestionBankService {
 
     private final QuestionBankMapper questionBankMapper;
@@ -53,24 +54,37 @@ public class QuestionBankService {
             if (scenarios == null || scenarios.isEmpty()) return;
 
             for (LabScenario s : scenarios) {
-                QuestionBank q = new QuestionBank();
-                q.setTitle(s.getKnowledgePoint());
-                q.setDescription(s.getExpectedPitfall());
-                q.setTrapCode(s.getTrapCode());
-                q.setExpectedPitfall(s.getExpectedPitfall());
-                q.setCorrectExplanation(s.getCorrectExplanation());
-                q.setHints(s.getHints());
-                q.setCategory(s.getCategory() != null ? s.getCategory() : "Java基础");
-                q.setDifficulty(s.getDifficulty() != null ? s.getDifficulty() : 1);
-                q.setStatus("ACTIVE");
-                q.setGmtCreate(LocalDateTime.now());
-                q.setGmtModified(LocalDateTime.now());
-                questionBankMapper.insert(q);
+                if (questionExists(s.getKnowledgePoint())) continue;
+                insertQuestionFromScenario(s);
             }
-            log.info("已从内置场景同步 {} 道题目到题库", scenarios.size());
+            log.info("已从场景库同步 {} 道题目到题库", scenarios.size());
         } catch (Exception e) {
-            log.warn("同步内置题目到题库失败（首次启动时可能无数据）: {}", e.getMessage());
+            log.warn("同步内置题目到题库失败: {}", e.getMessage());
         }
+    }
+
+    private boolean questionExists(String title) {
+        if (title == null) return false;
+        return questionBankMapper.selectCount(
+            new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<QuestionBank>()
+                .eq(QuestionBank::getTitle, title)
+        ) > 0;
+    }
+
+    private void insertQuestionFromScenario(LabScenario s) {
+        QuestionBank q = new QuestionBank();
+        q.setTitle(s.getKnowledgePoint());
+        q.setDescription(s.getExpectedPitfall());
+        q.setTrapCode(s.getTrapCode());
+        q.setExpectedPitfall(s.getExpectedPitfall());
+        q.setCorrectExplanation(s.getCorrectExplanation());
+        q.setHints(s.getHints());
+        q.setCategory(s.getCategory() != null ? s.getCategory() : "Java基础");
+        q.setDifficulty(s.getDifficulty() != null ? s.getDifficulty() : 1);
+        q.setStatus("ACTIVE");
+        q.setGmtCreate(LocalDateTime.now());
+        q.setGmtModified(LocalDateTime.now());
+        questionBankMapper.insert(q);
     }
 
     private static final String GENERATE_PROMPT = """
@@ -231,8 +245,13 @@ public class QuestionBankService {
                         current.append(line).append("\n");
                     }
                 }
-                if (section.equals("explain") || section.equals("code")) {
-                    correctExplanation = current.toString().trim();
+                // 保存最后一个 section 的内容
+                switch (section) {
+                    case "title": title = current.toString().trim(); break;
+                    case "desc": description = current.toString().trim(); break;
+                    case "code": trapCode = current.toString().trim(); break;
+                    case "pitfall": expectedPitfall = current.toString().trim(); break;
+                    case "explain": correctExplanation = current.toString().trim(); break;
                 }
 
                 if (title.isBlank()) {
@@ -297,6 +316,22 @@ public class QuestionBankService {
             new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<KnowledgeCard>()
                 .eq(KnowledgeCard::getQuestionId, id)
         );
+    }
+
+    public void approveQuestion(Long id) {
+        QuestionBank qb = questionBankMapper.selectById(id);
+        if (qb == null) throw new RuntimeException("题目不存在");
+        qb.setStatus("ACTIVE");
+        qb.setGmtModified(java.time.LocalDateTime.now());
+        questionBankMapper.updateById(qb);
+    }
+
+    public void rejectQuestion(Long id) {
+        QuestionBank qb = questionBankMapper.selectById(id);
+        if (qb == null) throw new RuntimeException("题目不存在");
+        qb.setStatus("REJECTED");
+        qb.setGmtModified(java.time.LocalDateTime.now());
+        questionBankMapper.updateById(qb);
     }
 
     public void setMastered(Long questionId, String userId, boolean mastered) {

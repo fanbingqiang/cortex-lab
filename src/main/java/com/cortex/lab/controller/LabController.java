@@ -345,6 +345,30 @@ public class LabController {
         }
     }
 
+    @PostMapping("/questions/{id}/approve")
+    public ApiResponse<Void> approveQuestion(@PathVariable Long id) {
+        // 审核通过题目
+        try {
+            questionBankService.approveQuestion(id);
+            return ApiResponse.success("审核通过", null);
+        } catch (Exception e) {
+            log.error("审核题目失败", e);
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
+    @PostMapping("/questions/{id}/reject")
+    public ApiResponse<Void> rejectQuestion(@PathVariable Long id) {
+        // 审核拒绝题目
+        try {
+            questionBankService.rejectQuestion(id);
+            return ApiResponse.success("已拒绝", null);
+        } catch (Exception e) {
+            log.error("拒绝题目失败", e);
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
     // ==================== 进度管理 ====================
 
     @PostMapping("/questions/{id}/mastered")
@@ -697,6 +721,18 @@ public class LabController {
             return ApiResponse.success("已拒绝", communityTrapService.reject(id));
         } catch (Exception e) {
             log.error("审核拒绝失败", e);
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
+    @PostMapping("/community/traps/{id}/delete")
+    public ApiResponse<Void> deleteCommunityTrap(@PathVariable Long id) {
+        // 删除陷阱
+        try {
+            communityTrapService.delete(id);
+            return ApiResponse.success("已删除", null);
+        } catch (Exception e) {
+            log.error("删除陷阱失败", e);
             return ApiResponse.error(e.getMessage());
         }
     }

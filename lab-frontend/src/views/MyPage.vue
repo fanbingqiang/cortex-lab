@@ -72,14 +72,33 @@ async function updateNotificationConfig() {
   try { await authApi.put('/notification/config', { userId: auth.userId, ...notificationConfig.value }) } catch {}
   finally { notifLoading.value = false }
 }
+function parseNarrative(data: unknown) {
+  if (data == null) return { summary: '暂无数据', performance: '' }
+  if (typeof data === 'object') return data as Record<string, unknown>
+  if (typeof data === 'string') {
+    const trimmed = data.trim()
+    if (trimmed.startsWith('{')) {
+      try { return JSON.parse(trimmed) } catch { /* fall through */ }
+    }
+    return { summary: 'AI 学习报告', performance: trimmed }
+  }
+  return { summary: 'AI 学习报告', performance: String(data) }
+}
+
 async function loadAiNarrative() {
-  narrativeLoading.value = true; narrativeResult.value = ''
+  if (!auth.isLoggedIn) return
+  narrativeLoading.value = true
+  narrativeResult.value = null
   try {
-    const res = await authApi.get<any>('/report/ai-narrative?userId=' + encodeURIComponent(auth.userId) + '&type=MONTHLY')
-    if (res.code === 200 && res.data) narrativeResult.value = typeof res.data === 'string' ? JSON.parse(res.data) : res.data
-    else narrativeResult.value = { summary: '生成失败', performance: res.message || '请稍后重试' }
-  } catch { narrativeResult.value = { summary: '生成失败', performance: '网络异常' } }
-  finally { narrativeLoading.value = false }
+    const res = await authApi.get<string>('/report/ai-narrative?userId=' + encodeURIComponent(auth.userId) + '&type=MONTHLY')
+    if (res.code === 200 && res.data) {
+      narrativeResult.value = parseNarrative(res.data)
+    } else {
+      narrativeResult.value = { summary: '生成失败', performance: res.message || '请稍后重试' }
+    }
+  } catch (e: any) {
+    narrativeResult.value = { summary: '生成失败', performance: e?.message || '网络异常' }
+  } finally { narrativeLoading.value = false }
 }
 
 onMounted(async () => {

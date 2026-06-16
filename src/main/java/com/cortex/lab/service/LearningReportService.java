@@ -20,7 +20,6 @@ import java.util.stream.Collectors;
 public class LearningReportService {
     // 学习报表服务：生成周报/月报，记录日常学习活动
 
-    private final LearningReportMapper reportMapper;
     private final DailyLearningMapper dailyLearningMapper;
     private final QuestionProgressMapper questionProgressMapper;
     private final QuestionBankMapper questionBankMapper;
@@ -38,20 +37,6 @@ public class LearningReportService {
             periodStart = today.minusDays(30);
         } else {
             throw new RuntimeException("不支持的报表类型: " + reportType);
-        }
-
-        // Save report to DB
-        LearningReport report = new LearningReport();
-        report.setUserId(userId);
-        report.setReportType(reportType.toUpperCase());
-        report.setPeriodStart(periodStart);
-        report.setPeriodEnd(periodEnd);
-        report.setGmtCreate(java.time.LocalDateTime.now());
-
-        try {
-            reportMapper.insert(report);
-        } catch (Exception e) {
-            log.warn("保存报表记录失败: {}", e.getMessage());
         }
 
         // Build report data
